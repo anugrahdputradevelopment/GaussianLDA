@@ -162,7 +162,7 @@ class Gauss_LDA(object):
                 # self.recalculate_topic_params(self.word_topics[word])
 
 
-                #calculate document-topic counts
+                #calculate document-topic countss
 
                 #recalculate topic param of new assignment
         init = False
