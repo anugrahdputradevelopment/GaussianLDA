@@ -13,7 +13,7 @@ class Wishart(object):
         self.nu = None
         self.kappa = None
         self.psi = None
-
+        self.mu = None
         self.set_params(word_vecs)
 
     def set_params(self, word_vecs):
@@ -23,9 +23,9 @@ class Wishart(object):
         self.nu = word_vecs.shape[1] #len of columns
         self.kappa = 0.01
         # self.psi = np.sum(word_vecs.T.dot(word_vecs), axis=0) # should this be np.sum(x.dot(x.T)))??? also changed this to x.T.dot(x)
-        self.psi = np.identity(word_vecs.shape[1]) * 3 #changed this to be a simple identity matrix.. like in the paper.  No intuition here..
+        self.psi = np.identity(word_vecs.shape[1]) * 3. #changed this to be a simple identity matrix.. like in the paper.  No intuition here..
         self.mu = np.mean(word_vecs, axis=0)
-        print "psi shape", self.psi.shape
+        # print "psi shape", self.psi.shape
 
 
 class Gauss_LDA(object):
@@ -91,7 +91,7 @@ class Gauss_LDA(object):
         print "Starting fit"
         for i in xrange(iterations):
             self.sample()
-            print "{} iterations complete".format(i)
+            print "\n{0} iterations complete".format(i)
 
     def init(self):
 
@@ -106,7 +106,7 @@ class Gauss_LDA(object):
         for docID, doc in self.corpus.iteritems():
             for word in doc:
                 topicID = self.word_topics[word]
-                self.doc_topic_CT[docID, topicID] += 1
+                self.doc_topic_CT[docID, topicID] += 1.
 
         # Init parameters for topic distributions
         for k in range(self.numtopics):
@@ -125,9 +125,9 @@ class Gauss_LDA(object):
             for word in doc:
                 #subtracting info about current word-topic assignment from doc-topic count table
                 topic_id = self.word_topics[word]
-                self.doc_topic_CT[docID, topic_id] - doc.count(word)
+                # self.doc_topic_CT[docID, topic_id] - float(doc.count(word)) #expirmenting with -= vs -
 
-                # self.update_document_topic_counts(word, "-")
+                self.update_document_topic_counts(word, "-")
 
                 self.recalculate_topic_params(topic_id)
                 posterior = []
@@ -138,33 +138,29 @@ class Gauss_LDA(object):
 
                     # Count of topic in doc
                     Nkd = self.doc_topic_CT[docID, k]
-                    print "Nkd = {}".format(Nkd)
+                    # print "Nkd = {}".format(Nkd)
                     log_posterior = log(Nkd + self.alpha) * log_prob
-                    print "log posteriror with doc-contribution", log_posterior
+                    # print "log posteriror with doc-contribution", log_posterior
                     posterior.append(log_posterior)
                     #doing this for some normalization scheme
                     if log_posterior > max: max = log_posterior
                 posterior.append(0) #just a little hitch in the function that wants a zero at the end.
-                print 'max', max
-                normalized_posterior = [exp(i-max) for i in posterior]
+                # print 'max', max
+                # normalized_posterior = [exp(i-max) for i in posterior]
                 post_sum = np.sum(posterior)
-                print 'sum of posterior', post_sum
+                # print 'sum of posterior', post_sum
                 # print 'exp method of normalizing', np.sum([i/np.sum(normalized_posterior) for i in posterior])
                 normalized_post = posterior / post_sum
-                print "normalized?", normalized_post, np.sum(normalized_post)
-                new_word_topic = np.random.multinomial(1, pvals=normalized_post)
-                print 'multinomial with reg-norm', new_word_topic
+                # print "normalized?", normalized_post, np.sum(normalized_post)
+                new_word_topic = np.random.multinomial(1, pvals=normalized_post) #possibly need 2 copy the util.sample from Das
+                # print 'multinomial with reg-norm', new_word_topic
                 # print 'multinomial with exp-norm', np.random.multinomial(1, pvals=normalized_posterior)
                 ## need to copy the normalization scheme from Util.sample
 
                 self.word_topics[word] = np.argmax(new_word_topic)
-                # self.recalculate_topic_params(word, "+")
-                # self.recalculate_topic_params(self.word_topics[word])
+                self.update_document_topic_counts(word, "+")
+                self.recalculate_topic_params(self.word_topics[word])
 
-
-                #calculate document-topic countss
-
-                #recalculate topic param of new assignment
         init = False
         return None
 
@@ -184,13 +180,12 @@ class Gauss_LDA(object):
 
         # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
         LLcomp = centered.T.dot(inv_cov).dot(centered) #for some topics, this outputs a negative value...
-        print 'll comp', LLcomp
+        # print 'll comp', LLcomp
         d = self.word_vec_size
-        nu = self.priors.nu + Nk - d + 1
-        print "d = {0}, nu{1}".format(d, nu)
+        nu = self.priors.nu + Nk - d + 1.
 
-        log_prop = gammaln(nu + d / 2) - \
-                   (gammaln(nu / 2) + d/2 * (log(nu) + log(pi)) +0.5 * cov_det[1] + (nu + d) / 2 * log((1 + LLcomp) / nu)) #cov_det is already logged
+        log_prop = gammaln(nu + d / 2.) - \
+                   (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu)) #cov_det is already logged
 
         return log_prop
         # logprob = Gamma.logGamma((nu + Data.D)/2) - \
@@ -206,15 +201,12 @@ class Gauss_LDA(object):
         scaled_topic_mean_K, scaled_topic_cov_K  = self.get_scaled_topic_MC(topic_id) # V-Bar_k and C_k
 
         vk_mu = scaled_topic_mean_K - self.priors.mu #V-bar_k - Mu
-        # print 'test 1', linalg.det(scaled_topic_cov_K)
-        # print 'test 2', linalg.slogdet(scaled_topic_cov_K)
+
         psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu)) # Psi_k
-        # print 'test 3', linalg.det(psi_k)
-        # print 'test 4', linalg.slogdet(psi_k)
+
         topic_mean = (self.priors.kappa * self.priors.mu + topic_count * scaled_topic_mean_K) / kappa_k # Mu_k
-        topic_cov = psi_k / (nu_k - self.word_vec_size + 1) # Sigma_k
-        # print 'test 5', linalg.det(topic_cov)
-        print 'log-det of topic-covar', linalg.slogdet(topic_cov) #regular determinant calculator breaks with super small numbers..
+        topic_cov = psi_k / (nu_k - self.word_vec_size + 1.) # Sigma_k
+        # print 'log-det of topic-covar', linalg.slogdet(topic_cov) #regular determinant calculator breaks with super small numbers..
 
         self.topic_params[topic_id]["Topic Count"] = topic_count
         self.topic_params[topic_id]["Topic Kappa"] = kappa_k
@@ -237,7 +229,7 @@ class Gauss_LDA(object):
 
 
         word_vecs = np.vstack(word_vecs)
-        mean = np.sum(word_vecs, axis=0) / (np.sum(self.doc_topic_CT[:, topic_id], axis=0) + 2) #added a small number here to stop overflow
+        mean = np.sum(word_vecs, axis=0) / (np.sum(self.doc_topic_CT[:, topic_id], axis=0) + 1.) #added a small number here to stop overflow
 
         # mean_centered = np.sum(word_vecs, axis=0) - mean
         mean_centered = word_vecs - mean
@@ -249,40 +241,40 @@ class Gauss_LDA(object):
         return mean, cov
 
 
-    def get_scaled_topic_mean_cov(self, topic_id):
-        'mean of word vecs in a topic'
-        # get words assigned to topic_id
-        word_vecs = []
-        for word, topic in self.word_topics.iteritems():
-            if topic == topic_id:
-                word_vecs.append(self.word_vecs[word])
-        word_vecs = np.vstack(word_vecs)
-        # print np.sum(word_vecs, axis=0)
-        # print np.sum(self.doc_topic_CT[:, topic_id], axis=0)
-        mean = np.sum(word_vecs, axis=0) / (np.sum(self.doc_topic_CT[:, topic_id], axis=0) + 2) #added a small number here to stop overflow
-
-        # mean_centered = np.sum(word_vecs, axis=0) - mean
-        mean_centered = word_vecs - mean
-        # print 'doc-topic counts', self.doc_topic_CT
-        # print 'mean', mean
-        # print 'mean centered' , mean_centered
-
-        cov = mean_centered.T.dot(mean_centered)
-        return mean, cov
+    # def get_scaled_topic_mean_cov(self, topic_id):
+    #     'mean of word vecs in a topic'
+    #     # get words assigned to topic_id
+    #     word_vecs = []
+    #     for word, topic in self.word_topics.iteritems():
+    #         if topic == topic_id:
+    #             word_vecs.append(self.word_vecs[word])
+    #     word_vecs = np.vstack(word_vecs)
+    #     # print np.sum(word_vecs, axis=0)
+    #     # print np.sum(self.doc_topic_CT[:, topic_id], axis=0)
+    #     mean = np.sum(word_vecs, axis=0) / (np.sum(self.doc_topic_CT[:, topic_id], axis=0) + 2) #added a small number here to stop overflow
+    #
+    #     # mean_centered = np.sum(word_vecs, axis=0) - mean
+    #     mean_centered = word_vecs - mean
+    #     # print 'doc-topic counts', self.doc_topic_CT
+    #     # print 'mean', mean
+    #     # print 'mean centered' , mean_centered
+    #
+    #     cov = mean_centered.T.dot(mean_centered)
+    #     return mean, cov
 
     def update_document_topic_counts(self, word, operation):
         topicID = self.word_topics[word]
         if operation == "-":
             for docID, doc in self.corpus.iteritems():
-                self.doc_topic_CT[docID, topicID] -= doc.count(word)
+                self.doc_topic_CT[docID, topicID] - float(doc.count(word))
 
         if operation == "+":
             for docID, doc in self.corpus.iteritems():
-                self.doc_topic_CT[docID, topicID] += doc.count(word)
+                self.doc_topic_CT[docID, topicID] + float(doc.count(word))
 
 
 if __name__ == "__main__":
-    corpus = ["apple orange mango melon", "dog cat bird rat"]
+    corpus = ["apple orange mango melon", "dog cat bird rat", "pineapple mouse fish kiwi grape strawberry rabbit"]
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     g = Gauss_LDA(2, corpus, wordvec_fileapth )
     g.fit(2)
