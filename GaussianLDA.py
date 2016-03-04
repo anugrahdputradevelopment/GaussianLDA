@@ -116,7 +116,6 @@ class Gauss_LDA(object):
 
     def sample(self, init=True):
 
-        print "sampling started"
         # Randomly assign word to topics
         if init == False:
             self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
@@ -167,7 +166,6 @@ class Gauss_LDA(object):
     def draw_new_wt_assgns(self, word, topic_id, new_doc=False, wvmodel=None):
         if new_doc == False:
             # Getting params for calculating PDF of T-Dist for a word
-            wordvec = self.word_vecs[word]
             inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
             cov_det = self.topic_params[topic_id]["Covariance Determinant"]
             Nk = self.topic_params[topic_id]["Topic Count"]
@@ -193,9 +191,9 @@ class Gauss_LDA(object):
             inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
             cov_det = self.topic_params[topic_id]["Covariance Determinant"]
             Nk = self.topic_params[topic_id]["Topic Count"]
-            KappaK = self.topic_params[topic_id]["Topic Kappa"]
+            # KappaK = self.topic_params[topic_id]["Topic Kappa"]
             centered = wvmodel[word] - self.priors.mu
-            topic_cov = self.topic_params[topic_id]["Topic Covariance"]
+            # topic_cov = self.topic_params[topic_id]["Topic Covariance"]
 
             LLcomp = centered.T.dot(inv_cov).dot(centered)
             # print 'll comp', LLcomp
@@ -267,6 +265,7 @@ class Gauss_LDA(object):
                 self.doc_topic_CT[docID, topicID] + float(doc.count(word))
 
     def extract_topics_new_doc(self, doc, wv_model):
+
         #clean out words in doc that are not in the word-vec space
         filtered_doc = []
         for word in doc.split():
@@ -274,65 +273,68 @@ class Gauss_LDA(object):
                 wv_model[word]
                 filtered_doc.append(word)
             except KeyError: continue
-        print "{} words removed from doc -- did not appear in word-vec corpus".format(len(filtered_doc) -len(doc.split()))
-        posterior = []
+        print "{} words removed from doc".format(len(filtered_doc) - len(doc.split()))
+        word_topics = []
         for word in filtered_doc:
+            posterior = []
             for k in range(self.numtopics):
-                prob = self.draw_new_wt_assgns(word, k, wv_model) * log(self.alpha)
+                prob = self.draw_new_wt_assgns(word, k, wvmodel=wv_model, new_doc=True) * log(self.alpha + np.random.randint(1, 4))
+                print "probablity of {0} for word {1} assigned to topic {2}".format(prob, word, k)
                 posterior.append(prob)
-            posterior.append(0)
+            posterior /= np.sum(posterior)
 
-            pass
+            word_topics.append((word, np.argmax(posterior)))
+        return word_topics
 
-    def score_samples(self, X):
-        """Return the per-sample likelihood of the data under the model.
-        Compute the log probability of X under the model and
-        return the posterior distribution (responsibilities) of each
-        mixture component for each element of X.
-        Parameters
-        ----------
-        X: array_like, shape (n_samples, n_features)
-            List of n_features-dimensional data points. Each row
-            corresponds to a single data point.
-        Returns
-        -------
-        logprob : array_like, shape (n_samples,)
-            Log probabilities of each data point in X.
-        responsibilities : array_like, shape (n_samples, n_components)
-            Posterior probabilities of each mixture component for each
-            observation
-        """
-        check_is_fitted(self, 'means_')
-
-        X = check_array(X)
-        if X.ndim == 1:
-            X = X[:, np.newaxis]
-        if X.size == 0:
-            return np.array([]), np.empty((0, self.n_components))
-        if X.shape[1] != self.means_.shape[1]:
-            raise ValueError('The shape of X  is not compatible with self')
-
-        lpr = (log_multivariate_normal_density(X, self.means_, self.covars_,
-                                               self.covariance_type) +
-               np.log(self.weights_))
-        logprob = logsumexp(lpr, axis=1)
-        responsibilities = np.exp(lpr - logprob[:, np.newaxis])
-        return logprob, responsibilities
-
-    def score(self, X, y=None):
-        """Compute the log probability under the model.
-        Parameters
-        ----------
-        X : array_like, shape (n_samples, n_features)
-            List of n_features-dimensional data points. Each row
-            corresponds to a single data point.
-        Returns
-        -------
-        logprob : array_like, shape (n_samples,)
-            Log probabilities of each data point in X
-        """
-        logprob, _ = self.score_samples(X)
-        return logprob
+    # def score_samples(self, X):
+    #     """Return the per-sample likelihood of the data under the model.
+    #     Compute the log probability of X under the model and
+    #     return the posterior distribution (responsibilities) of each
+    #     mixture component for each element of X.
+    #     Parameters
+    #     ----------
+    #     X: array_like, shape (n_samples, n_features)
+    #         List of n_features-dimensional data points. Each row
+    #         corresponds to a single data point.
+    #     Returns
+    #     -------
+    #     logprob : array_like, shape (n_samples,)
+    #         Log probabilities of each data point in X.
+    #     responsibilities : array_like, shape (n_samples, n_components)
+    #         Posterior probabilities of each mixture component for each
+    #         observation
+    #     """
+    #     check_is_fitted(self, 'means_')
+    #
+    #     X = check_array(X)
+    #     if X.ndim == 1:
+    #         X = X[:, np.newaxis]
+    #     if X.size == 0:
+    #         return np.array([]), np.empty((0, self.n_components))
+    #     if X.shape[1] != self.means_.shape[1]:
+    #         raise ValueError('The shape of X  is not compatible with self')
+    #
+    #     lpr = (log_multivariate_normal_density(X, self.means_, self.covars_,
+    #                                            self.covariance_type) +
+    #            np.log(self.weights_))
+    #     logprob = logsumexp(lpr, axis=1)
+    #     responsibilities = np.exp(lpr - logprob[:, np.newaxis])
+    #     return logprob, responsibilities
+    #
+    # def score(self, X, y=None):
+    #     """Compute the log probability under the model.
+    #     Parameters
+    #     ----------
+    #     X : array_like, shape (n_samples, n_features)
+    #         List of n_features-dimensional data points. Each row
+    #         corresponds to a single data point.
+    #     Returns
+    #     -------
+    #     logprob : array_like, shape (n_samples,)
+    #         Log probabilities of each data point in X
+    #     """
+    #     logprob, _ = self.score_samples(X)
+    #     return logprob
 
 
 
