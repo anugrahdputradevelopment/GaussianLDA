@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="1af6feaa-a917-487d-a974-2333eca2f078" name="Default" comment="">
+    <list default="true" id="1af6feaa-a917-487d-a974-2333eca2f078" name="Default" comment="adding method for extracting topics out of a new document with MLE">
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/GaussianLDA.py" afterPath="$PROJECT_DIR$/GaussianLDA.py" />
     </list>
     <ignored path="GaussianLDA.iws" />
@@ -26,8 +26,8 @@
       <file leaf-file-name="GaussianLDA.py" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/GaussianLDA.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.35952637">
-              <caret line="93" column="21" selection-start-line="93" selection-start-column="21" selection-end-line="93" selection-end-column="21" />
+            <state vertical-scroll-proportion="0.09364908">
+              <caret line="283" column="0" selection-start-line="283" selection-start-column="0" selection-end-line="283" selection-end-column="0" />
               <folding />
             </state>
           </provider>
@@ -324,6 +324,10 @@
   <component name="VcsContentAnnotationSettings">
     <option name="myLimit" value="2678400000" />
   </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="adding method for extracting topics out of a new document with MLE" />
+    <option name="LAST_COMMIT_MESSAGE" value="adding method for extracting topics out of a new document with MLE" />
+  </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
@@ -362,8 +366,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/GaussianLDA.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.35952637">
-          <caret line="93" column="21" selection-start-line="93" selection-start-column="21" selection-end-line="93" selection-end-column="21" />
+        <state vertical-scroll-proportion="0.09364908">
+          <caret line="283" column="0" selection-start-line="283" selection-start-column="0" selection-end-line="283" selection-end-column="0" />
           <folding />
         </state>
       </provider>

@@ -164,32 +164,48 @@ class Gauss_LDA(object):
         init = False
         return None
 
-    def draw_new_wt_assgns(self, word, topic_id):
+    def draw_new_wt_assgns(self, word, topic_id, new_doc=False, wvmodel=None):
+        if new_doc == False:
+            # Getting params for calculating PDF of T-Dist for a word
+            wordvec = self.word_vecs[word]
+            inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
+            cov_det = self.topic_params[topic_id]["Covariance Determinant"]
+            Nk = self.topic_params[topic_id]["Topic Count"]
+            KappaK = self.topic_params[topic_id]["Topic Kappa"]
+            centered = self.word_vecs[word] - self.priors.mu
+            topic_cov = self.topic_params[topic_id]["Topic Covariance"]
 
-        # Getting params for calculating PDF of T-Dist for a word
-        wordvec = self.word_vecs[word]
-        inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
-        cov_det = self.topic_params[topic_id]["Covariance Determinant"]
-        Nk = self.topic_params[topic_id]["Topic Count"]
-        KappaK = self.topic_params[topic_id]["Topic Kappa"]
-        centered = self.word_vecs[word] - self.priors.mu
-        topic_cov = self.topic_params[topic_id]["Topic Covariance"]
-
-        # print "topic cov", topic_cov
+            # print "topic cov", topic_cov
 
 
-        # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
-        LLcomp = centered.T.dot(inv_cov).dot(centered) #for some topics, this outputs a negative value...
-        # print 'll comp', LLcomp
-        d = self.word_vec_size
-        nu = self.priors.nu + Nk - d + 1.
+            # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
+            LLcomp = centered.T.dot(inv_cov).dot(centered) #for some topics, this outputs a negative value...
+            # print 'll comp', LLcomp
+            d = self.word_vec_size
+            nu = self.priors.nu + Nk - d + 1.
 
-        log_prop = gammaln(nu + d / 2.) - \
-                   (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu)) #cov_det is already logged
+            log_prop = gammaln(nu + d / 2.) - \
+                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu)) #cov_det is already logged
 
-        return log_prop
-        # logprob = Gamma.logGamma((nu + Data.D)/2) - \
-        #           (Gamma.logGamma(nu/2) + Data.D/2 * (Math.log(nu)+Math.log(Math.PI)) + 0.5 * Math.log(det) + (nu + Data.D)/2* Math.log(1+val/nu))
+            return log_prop
+
+        if new_doc == True:
+            inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
+            cov_det = self.topic_params[topic_id]["Covariance Determinant"]
+            Nk = self.topic_params[topic_id]["Topic Count"]
+            KappaK = self.topic_params[topic_id]["Topic Kappa"]
+            centered = wvmodel[word] - self.priors.mu
+            topic_cov = self.topic_params[topic_id]["Topic Covariance"]
+
+            LLcomp = centered.T.dot(inv_cov).dot(centered)
+            # print 'll comp', LLcomp
+            d = wvmodel.vector_size
+            nu = self.priors.nu + Nk - d + 1.
+            log_prob = gammaln(nu + d / 2.) - \
+                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu))
+
+            return log_prob
+
 
     def recalculate_topic_params(self, topic_id):
 
@@ -216,7 +232,6 @@ class Gauss_LDA(object):
         self.topic_params[topic_id]["Covariance Determinant"] = np.linalg.slogdet(topic_cov)
         self.topic_params[topic_id]["Liklihood Componant"] = None
 
-
         return topic_mean, topic_cov
 
     def get_scaled_topic_MC(self, topic_id):
@@ -241,27 +256,6 @@ class Gauss_LDA(object):
         return mean, cov
 
 
-    # def get_scaled_topic_mean_cov(self, topic_id):
-    #     'mean of word vecs in a topic'
-    #     # get words assigned to topic_id
-    #     word_vecs = []
-    #     for word, topic in self.word_topics.iteritems():
-    #         if topic == topic_id:
-    #             word_vecs.append(self.word_vecs[word])
-    #     word_vecs = np.vstack(word_vecs)
-    #     # print np.sum(word_vecs, axis=0)
-    #     # print np.sum(self.doc_topic_CT[:, topic_id], axis=0)
-    #     mean = np.sum(word_vecs, axis=0) / (np.sum(self.doc_topic_CT[:, topic_id], axis=0) + 2) #added a small number here to stop overflow
-    #
-    #     # mean_centered = np.sum(word_vecs, axis=0) - mean
-    #     mean_centered = word_vecs - mean
-    #     # print 'doc-topic counts', self.doc_topic_CT
-    #     # print 'mean', mean
-    #     # print 'mean centered' , mean_centered
-    #
-    #     cov = mean_centered.T.dot(mean_centered)
-    #     return mean, cov
-
     def update_document_topic_counts(self, word, operation):
         topicID = self.word_topics[word]
         if operation == "-":
@@ -272,10 +266,79 @@ class Gauss_LDA(object):
             for docID, doc in self.corpus.iteritems():
                 self.doc_topic_CT[docID, topicID] + float(doc.count(word))
 
+    def extract_topics_new_doc(self, doc, wv_model):
+        #clean out words in doc that are not in the word-vec space
+        filtered_doc = []
+        for word in doc.split():
+            try:
+                wv_model[word]
+                filtered_doc.append(word)
+            except KeyError: continue
+        print "{} words removed from doc -- did not appear in word-vec corpus".format(len(filtered_doc) -len(doc.split()))
+        posterior = []
+        for word in filtered_doc:
+            for k in range(self.numtopics):
+                prob = self.draw_new_wt_assgns(word, k, wv_model) * log(self.alpha)
+                posterior.append(prob)
+            posterior.append(0)
+
+            pass
+
+    def score_samples(self, X):
+        """Return the per-sample likelihood of the data under the model.
+        Compute the log probability of X under the model and
+        return the posterior distribution (responsibilities) of each
+        mixture component for each element of X.
+        Parameters
+        ----------
+        X: array_like, shape (n_samples, n_features)
+            List of n_features-dimensional data points. Each row
+            corresponds to a single data point.
+        Returns
+        -------
+        logprob : array_like, shape (n_samples,)
+            Log probabilities of each data point in X.
+        responsibilities : array_like, shape (n_samples, n_components)
+            Posterior probabilities of each mixture component for each
+            observation
+        """
+        check_is_fitted(self, 'means_')
+
+        X = check_array(X)
+        if X.ndim == 1:
+            X = X[:, np.newaxis]
+        if X.size == 0:
+            return np.array([]), np.empty((0, self.n_components))
+        if X.shape[1] != self.means_.shape[1]:
+            raise ValueError('The shape of X  is not compatible with self')
+
+        lpr = (log_multivariate_normal_density(X, self.means_, self.covars_,
+                                               self.covariance_type) +
+               np.log(self.weights_))
+        logprob = logsumexp(lpr, axis=1)
+        responsibilities = np.exp(lpr - logprob[:, np.newaxis])
+        return logprob, responsibilities
+
+    def score(self, X, y=None):
+        """Compute the log probability under the model.
+        Parameters
+        ----------
+        X : array_like, shape (n_samples, n_features)
+            List of n_features-dimensional data points. Each row
+            corresponds to a single data point.
+        Returns
+        -------
+        logprob : array_like, shape (n_samples,)
+            Log probabilities of each data point in X
+        """
+        logprob, _ = self.score_samples(X)
+        return logprob
+
+
+
 
 if __name__ == "__main__":
     corpus = ["apple orange mango melon", "dog cat bird rat", "pineapple mouse fish kiwi grape strawberry rabbit"]
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     g = Gauss_LDA(2, corpus, wordvec_fileapth )
     g.fit(2)
-    # print g.topic_params[1]["Topic Count"]
