@@ -6,7 +6,6 @@ from scipy.special import gamma, gammaln
 import random
 from collections import defaultdict
 
-
 class Wishart(object):
 
     def __init__(self, word_vecs):
@@ -19,14 +18,11 @@ class Wishart(object):
     def set_params(self, word_vecs):
         #turn dict of word vecs into a matrix
         word_vecs = np.vstack(word_vecs.values())
-
         self.nu = word_vecs.shape[1] #len of columns
         self.kappa = 0.01
         # self.psi = np.sum(word_vecs.T.dot(word_vecs), axis=0) # should this be np.sum(x.dot(x.T)))??? also changed this to x.T.dot(x)
         self.psi = np.identity(word_vecs.shape[1]) * 3. #changed this to be a simple identity matrix.. like in the paper.  No intuition here..
         self.mu = np.mean(word_vecs, axis=0)
-        # print "psi shape", self.psi.shape
-
 
 class Gauss_LDA(object):
 
@@ -106,7 +102,7 @@ class Gauss_LDA(object):
         for docID, doc in self.corpus.iteritems():
             for word in doc:
                 topicID = self.word_topics[word]
-                self.doc_topic_CT[docID, topicID] += 1.
+                self.doc_topic_CT[docID, topicID] += 1. # TODO: SHOULD THIS BE + INSTEAD OF +=???
 
         # Init parameters for topic distributions
         for k in range(self.numtopics):
@@ -164,17 +160,17 @@ class Gauss_LDA(object):
         return None
 
     def draw_new_wt_assgns(self, word, topic_id, new_doc=False, wvmodel=None):
+
         if new_doc == False:
             # Getting params for calculating PDF of T-Dist for a word
             inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
             cov_det = self.topic_params[topic_id]["Covariance Determinant"]
             Nk = self.topic_params[topic_id]["Topic Count"]
-            KappaK = self.topic_params[topic_id]["Topic Kappa"]
+            # KappaK = self.topic_params[topic_id]["Topic Kappa"]
             centered = self.word_vecs[word] - self.priors.mu
-            topic_cov = self.topic_params[topic_id]["Topic Covariance"]
+            # topic_cov = self.topic_params[topic_id]["Topic Covariance"]
 
             # print "topic cov", topic_cov
-
 
             # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
             LLcomp = centered.T.dot(inv_cov).dot(centered) #for some topics, this outputs a negative value...
@@ -228,7 +224,6 @@ class Gauss_LDA(object):
         self.topic_params[topic_id]["Topic Mean"], self.topic_params[topic_id]["Topic Covariance"] = topic_mean, topic_cov
         self.topic_params[topic_id]["Inverse Covariance"] = np.linalg.inv(topic_cov)
         self.topic_params[topic_id]["Covariance Determinant"] = np.linalg.slogdet(topic_cov)
-        self.topic_params[topic_id]["Liklihood Componant"] = None
 
         return topic_mean, topic_cov
 
@@ -244,12 +239,9 @@ class Gauss_LDA(object):
         word_vecs = np.vstack(word_vecs)
         mean = np.sum(word_vecs, axis=0) / (np.sum(self.doc_topic_CT[:, topic_id], axis=0) + 1.) #added a small number here to stop overflow
 
-        # mean_centered = np.sum(word_vecs, axis=0) - mean
         mean_centered = word_vecs - mean
-        # print 'doc-topic counts', self.doc_topic_CT
         # print 'mean', mean
         # print 'mean centered' , mean_centered
-
         cov = mean_centered.T.dot(mean_centered)
         return mean, cov
 
@@ -291,21 +283,16 @@ class Gauss_LDA(object):
     #     Compute the log probability of X under the model and
     #     return the posterior distribution (responsibilities) of each
     #     mixture component for each element of X.
-    #     Parameters
-    #     ----------
+
     #     X: array_like, shape (n_samples, n_features)
     #         List of n_features-dimensional data points. Each row
     #         corresponds to a single data point.
-    #     Returns
-    #     -------
     #     logprob : array_like, shape (n_samples,)
     #         Log probabilities of each data point in X.
     #     responsibilities : array_like, shape (n_samples, n_components)
     #         Posterior probabilities of each mixture component for each
-    #         observation
-    #     """
+    #         observati
     #     check_is_fitted(self, 'means_')
-    #
     #     X = check_array(X)
     #     if X.ndim == 1:
     #         X = X[:, np.newaxis]
@@ -313,34 +300,16 @@ class Gauss_LDA(object):
     #         return np.array([]), np.empty((0, self.n_components))
     #     if X.shape[1] != self.means_.shape[1]:
     #         raise ValueError('The shape of X  is not compatible with self')
-    #
+
     #     lpr = (log_multivariate_normal_density(X, self.means_, self.covars_,
     #                                            self.covariance_type) +
     #            np.log(self.weights_))
     #     logprob = logsumexp(lpr, axis=1)
     #     responsibilities = np.exp(lpr - logprob[:, np.newaxis])
-    #     return logprob, responsibilities
-    #
-    # def score(self, X, y=None):
-    #     """Compute the log probability under the model.
-    #     Parameters
-    #     ----------
-    #     X : array_like, shape (n_samples, n_features)
-    #         List of n_features-dimensional data points. Each row
-    #         corresponds to a single data point.
-    #     Returns
-    #     -------
-    #     logprob : array_like, shape (n_samples,)
-    #         Log probabilities of each data point in X
-    #     """
-    #     logprob, _ = self.score_samples(X)
-    #     return logprob
-
-
-
+    #     return logprob, responsibilitie
 
 if __name__ == "__main__":
     corpus = ["apple orange mango melon", "dog cat bird rat", "pineapple mouse fish kiwi grape strawberry rabbit"]
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
-    g = Gauss_LDA(2, corpus, wordvec_fileapth )
+    g = Gauss_LDA(2, corpus, wordvec_fileapth)
     g.fit(2)

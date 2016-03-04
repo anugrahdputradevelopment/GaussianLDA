@@ -26,9 +26,11 @@
       <file leaf-file-name="GaussianLDA.py" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/GaussianLDA.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.5920502">
-              <caret line="291" column="53" selection-start-line="291" selection-start-column="53" selection-end-line="291" selection-end-column="53" />
-              <folding />
+            <state vertical-scroll-proportion="2.961297">
+              <caret line="303" column="78" selection-start-line="303" selection-start-column="78" selection-end-line="303" selection-end-column="78" />
+              <folding>
+                <element signature="e#0#31#0" expanded="true" />
+              </folding>
             </state>
           </provider>
         </entry>
@@ -330,18 +332,6 @@
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
-      <breakpoints>
-        <line-breakpoint enabled="true" type="python-line">
-          <url>file://$PROJECT_DIR$/GaussianLDA.py</url>
-          <line>168</line>
-          <option name="timeStamp" value="37" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="python-line">
-          <url>file://$PROJECT_DIR$/GaussianLDA.py</url>
-          <line>146</line>
-          <option name="timeStamp" value="41" />
-        </line-breakpoint>
-      </breakpoints>
       <breakpoints-dialog>
         <breakpoints-dialog />
       </breakpoints-dialog>
@@ -366,9 +356,11 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/GaussianLDA.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.5920502">
-          <caret line="291" column="53" selection-start-line="291" selection-start-column="53" selection-end-line="291" selection-end-column="53" />
-          <folding />
+        <state vertical-scroll-proportion="2.961297">
+          <caret line="303" column="78" selection-start-line="303" selection-start-column="78" selection-end-line="303" selection-end-column="78" />
+          <folding>
+            <element signature="e#0#31#0" expanded="true" />
+          </folding>
         </state>
       </provider>
     </entry>
