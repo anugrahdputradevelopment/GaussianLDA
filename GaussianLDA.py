@@ -5,6 +5,8 @@ from numpy import log, pi, linalg, exp
 from scipy.special import gamma, gammaln
 import random
 from collections import defaultdict
+__author__ = "Michael Mansour"
+
 
 class Wishart(object):
 
@@ -18,9 +20,9 @@ class Wishart(object):
     def set_params(self, word_vecs):
         #turn dict of word vecs into a matrix
         word_vecs = np.vstack(word_vecs.values())
-        self.nu = word_vecs.shape[1] #len of columns
+        self.nu = word_vecs.shape[1] # dimensionality of word-vectors
         self.kappa = 0.01
-        # self.psi = np.sum(word_vecs.T.dot(word_vecs), axis=0) # should this be np.sum(x.dot(x.T)))??? also changed this to x.T.dot(x)
+        # self.psi = word_vecs.T.dot(word_vecs)#, axis=0)
         self.psi = np.identity(word_vecs.shape[1]) * 3. #changed this to be a simple identity matrix.. like in the paper.  No intuition here..
         self.mu = np.mean(word_vecs, axis=0)
 
@@ -38,7 +40,7 @@ class Gauss_LDA(object):
         self.wordvecFP = word_vector_filepath
         self.word_index = {}
         self.word_vec_size = None
-        self.alpha = 50./self.numtopics
+        self.alpha = 50. / self.numtopics
 
 
     def process_corpus(self, documents):
@@ -55,7 +57,6 @@ class Gauss_LDA(object):
 
     def process_wordvectors(self, filepath):
         print "Processing word-vectors, this takes a moment"
-
         vectors = gensim.models.Word2Vec.load_word2vec_format(fname=filepath, binary=False)
         useable_vocab = 0
         unusable_vocab = 0
@@ -76,10 +77,11 @@ class Gauss_LDA(object):
                 self.word_vecs[word] = vectors[word]
                 index += 1
             except KeyError: continue
+
         print "Word-vectors for the corpus are created"
 
 
-    def fit(self, iterations=1, init=True): #set hyperparams here?
+    def fit(self, iterations=1, init=True):
         if init == True:
             self.init()
             init = False
@@ -87,14 +89,13 @@ class Gauss_LDA(object):
         print "Starting fit"
         for i in xrange(iterations):
             self.sample()
-            print "\n{0} iterations complete".format(i)
+            print "{0} iterations complete".format(i)
 
     def init(self):
 
         self.process_corpus(self.corpus)
         self.process_wordvectors(self.wordvecFP)
-        #setting wishhart priors
-        self.priors = Wishart(self.word_vecs)
+        self.priors = Wishart(self.word_vecs) # set wishhart priors
         self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))
 
         self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
@@ -104,8 +105,7 @@ class Gauss_LDA(object):
                 topicID = self.word_topics[word]
                 self.doc_topic_CT[docID, topicID] += 1. # TODO: SHOULD THIS BE + INSTEAD OF +=???
 
-        # Init parameters for topic distributions
-        for k in range(self.numtopics):
+        for k in range(self.numtopics): # Init parameters for topic distributions
             self.recalculate_topic_params(k, self.doc_topic_CT)
 
         print "Intialization complete"
@@ -132,31 +132,24 @@ class Gauss_LDA(object):
 
                     log_prob = self.draw_new_wt_assgns(word, k)
                     # print "multivariate T PDF for wordvector", log_prob
-
-                    # Count of topic in doc
-                    Nkd = self.doc_topic_CT[docID, k]
+                    Nkd = topic_counts[docID, k] # Count of topic in doc
                     # print "Nkd = {}".format(Nkd)
                     log_posterior = log(Nkd + self.alpha) * log_prob
                     # print "log posteriror with doc-contribution", log_posterior
                     posterior.append(log_posterior)  # doing this for some normalization scheme
                     if log_posterior > max: max = log_posterior
+
                 posterior.append(0) #just a little hitch in the function that wants a zero at the end.
-                # print 'max', max
-                # normalized_posterior = [exp(i-max) for i in posterior]
                 post_sum = np.sum(posterior)
-                # print 'sum of posterior', post_sum
-                # print 'exp method of normalizing', np.sum([i/np.sum(normalized_posterior) for i in posterior])
                 normalized_post = posterior / post_sum
-                # print "normalized?", normalized_post, np.sum(normalized_post)
                 new_word_topic = np.random.multinomial(1, pvals=normalized_post) #possibly need 2 copy the util.sample from Das
                 # print 'multinomial with reg-norm', new_word_topic
-                # print 'multinomial with exp-norm', np.random.multinomial(1, pvals=normalized_posterior)
 
                 self.word_topics[word] = np.argmax(new_word_topic)
                 self.doc_topic_CT = self.update_document_topic_counts(word, self.word_topics[word], "+")
                 self.recalculate_topic_params(self.word_topics[word], self.doc_topic_CT)
 
-        init = False
+        # init = False
         return None
 
     def draw_new_wt_assgns(self, word, topic_id, new_doc=False, wvmodel=None):
@@ -176,7 +169,7 @@ class Gauss_LDA(object):
             nu = self.priors.nu + Nk - d + 1.
 
             log_prop = gammaln(nu + d / 2.) - \
-                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu)) #cov_det is already logged
+                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp ) / nu)) #cov_det is already logged
 
             return log_prop
 
@@ -187,10 +180,9 @@ class Gauss_LDA(object):
             centered = wvmodel[word] - self.priors.mu
 
             LLcomp = centered.T.dot(inv_cov).dot(centered)
-            # print 'll comp', LLcomp
             d = wvmodel.vector_size
             nu = self.priors.nu + Nk - d + 1.
-            log_prob = gammaln(nu + d / 2.) - \
+            log_prob = gammaln((nu + d) / 2.) - \
                        (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu))
 
             return log_prob
@@ -199,33 +191,28 @@ class Gauss_LDA(object):
     def recalculate_topic_params(self, topic_id, topic_counts):
 
         topic_count = np.sum(topic_counts[:, topic_id], axis=0) # N_k
-
         kappa_k = self.priors.kappa + topic_count # K_k
         nu_k = self.priors.nu + topic_count # V_k
-
         scaled_topic_mean_K, scaled_topic_cov_K  = self.get_scaled_topic_MC(topic_id, topic_counts) # V-Bar_k and C_k
-
         vk_mu = scaled_topic_mean_K - self.priors.mu #V-bar_k - Mu
 
         psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu)) # Psi_k
 
         topic_mean = (self.priors.kappa * self.priors.mu + topic_count * scaled_topic_mean_K) / kappa_k # Mu_k
         topic_cov = psi_k / (nu_k - self.word_vec_size + 1.) # Sigma_k
-        # print 'log-det of topic-covar', linalg.slogdet(topic_cov) #regular determinant calculator breaks with super small numbers..
 
         self.topic_params[topic_id]["Topic Count"] = topic_count
         self.topic_params[topic_id]["Topic Kappa"] = kappa_k
         self.topic_params[topic_id]["Topic Nu"] = nu_k
         self.topic_params[topic_id]["Topic Mean"], self.topic_params[topic_id]["Topic Covariance"] = topic_mean, topic_cov
         self.topic_params[topic_id]["Inverse Covariance"] = np.linalg.inv(topic_cov)
-        self.topic_params[topic_id]["Covariance Determinant"] = np.linalg.slogdet(topic_cov)
+        self.topic_params[topic_id]["Covariance Determinant"] = np.linalg.slogdet(topic_cov) # regular determinant calculator breaks with super small numbers
 
         return topic_mean, topic_cov
 
     def get_scaled_topic_MC(self, topic_id, topic_count):
         # get words assigned to topic_id
-        # print topic_id
-        # print self.word_topics
+
         topic_vecs = []
         for docID, doc in self.corpus.iteritems():
             for word in doc:
@@ -234,16 +221,16 @@ class Gauss_LDA(object):
                 if self.word_topics[word] == topic_id:
                     topic_vecs.append(self.word_vecs[word])
 
-        if len(topic_vecs) < 2: # DEBUGGING.. turned out topic-assgns were whack
-            print 'I DONE BROKE \n HE HAW'
-            print topic_id, "TOPIC ID"
-            print self.word_topics
-            print len(topic_vecs), 'LEN WORD VEC'
-            self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
-            self.get_scaled_topic_MC(topic_id, topic_count)
+        # if len(topic_vecs) < 2: # DEBUGGING.. turned out topic-assgns were whack
+        #     print 'I DONE BROKE \n HE HAW'
+        #     print topic_id, "TOPIC ID"
+        #     print self.word_topics
+        #     print len(topic_vecs), 'LEN WORD VEC'
+        #     self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
+        #     self.get_scaled_topic_MC(topic_id, topic_count)
 
         topic_vecs = np.vstack(topic_vecs)
-        mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0)) # added a small number here to stop overflow
+        mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
 
         mean_centered = topic_vecs - mean
         cov = mean_centered.T.dot(mean_centered)
@@ -263,6 +250,15 @@ class Gauss_LDA(object):
         return topic_counts
 
     def extract_topics_new_doc(self, doc, wv_model):
+        '''
+
+        :param doc: Document to extrac topics from.  should be one string
+        :param wv_model: a loaded word2vec model with same dimensionality as training one.  Use GenSim Word2Vec
+        :return: List of tuples (word, topic)
+
+        Method removes words in doc that are not in the Word2Vec corpus, and extracts word-topic assignments for each
+        word by drawing densities from the multivariate student-T distribution
+        '''
 
         #clean out words in doc that are not in the word-vec space
         filtered_doc = []
@@ -288,7 +284,7 @@ class Gauss_LDA(object):
             word_topics.append((word, np.argmax(posterior)))
         return word_topics
 
-   
+
 if __name__ == "__main__":
     corpus = ["apple orange mango melon", "dog cat bird rat", "pineapple kiwi grape strawberry",
               "rabbit mouse horse goat", "coconut guava blueberry blackberry", "raptor hawk shark bear",
