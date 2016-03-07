@@ -44,6 +44,11 @@ class Gauss_LDA(object):
 
 
     def process_corpus(self, documents):
+        """
+        Tokenizes documents into dict of lists of tokens
+        :param documents: expects list of strings
+        :return: dict{document ID: list of tokens
+        """
 
         temp_corpus = {}
         for index, doc in enumerate(documents):
@@ -56,6 +61,17 @@ class Gauss_LDA(object):
 
 
     def process_wordvectors(self, filepath):
+        """
+        Takes a trained Word2Vec model, tests each word in vocab against it, and only keeps word vectors that
+        are in your document corpus, and that are in the word2vec corpus.
+
+        Decreases memory requirements for holding word vector info.
+
+        :param filepath: filepath of word-vector file.  Requires 2 things at top of .txt document:
+        number of tokens trained on & dimensionality of word-vectors
+        :return: None - sets class-variable (self.word_vecs) to be a dict{word: word-vector}
+        """
+
         print "Processing word-vectors, this takes a moment"
         vectors = gensim.models.Word2Vec.load_word2vec_format(fname=filepath, binary=False)
         useable_vocab = 0
@@ -74,7 +90,8 @@ class Gauss_LDA(object):
         for word in self.vocab:
             try:
                 self.word_vecs[word] = vectors[word]  # Dict{Word: Word-Vector}
-            except KeyError: continue
+            except KeyError: continue  # TODO: remove words from document if they're not in the word-vec corpus
+
 
         print "Word-vectors for the corpus are created"
 
@@ -107,15 +124,14 @@ class Gauss_LDA(object):
 
         print "Intialization complete"
 
-    def sample(self, init=True):
+    def sample(self):
+        """
+        Collapsed Gibbs Sampler derived from Steyver's method, adapted for continuous word-vectors
+        :return: None.  Readjusts topic distribution parameters and topic-counts
+        """
 
-        # Randomly assign word to topics
-        if init == False:
-            self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
         for docID, doc in self.corpus.iteritems():
             for word in doc:
-                # subtracting info about current word-topic assignment from doc-topic count table
-
                 # self.doc_topic_CT[docID, topic_id] - float(doc.count(word)) #expirmenting with -= vs -
                 # self.update_document_topic_counts(word, "-")
                 # self.recalculate_topic_params(self.word_topics[word])
@@ -123,31 +139,42 @@ class Gauss_LDA(object):
                 posterior = []
                 max = 0
                 for k in range(self.numtopics):  # start getting the pdf's for each word-topic assignment
-                    topic_counts = self.update_document_topic_counts(word, k, "-")
+                    topic_counts = self.update_document_topic_counts(word, k, "-")  # subtracting info about current word-topic assignment from doc-topic count table
                     self.recalculate_topic_params(k, topic_counts)
 
-                    log_prob = self.draw_new_wt_assgns(word, k)
-                    # print "multivariate T PDF for wordvector", log_prob
+                    log_pdf = self.draw_new_wt_assgns(word, k)
                     Nkd = topic_counts[docID, k] # Count of topic in doc
                     # print "Nkd = {}".format(Nkd)
-                    log_posterior = log(Nkd + self.alpha) * log_prob  #; print "log posteriror with doc-contribution", log_posterior
+                    log_posterior = log(Nkd + self.alpha) * log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
                     posterior.append(log_posterior)  # doing this for some normalization scheme
-                    if log_posterior > max: max = log_posterior
+                    if log_posterior > max: max = log_posterior  # copied from R. Das code, not actually used here
 
-                posterior.append(0)  # just a little hitch in the function that wants a zero at the end.
+                posterior.append(0.)  # just a little hitch in function. It wants a zero at the end, otherwise it may say sum(pvals) != 1.0.
                 post_sum = np.sum(posterior)
                 normalized_post = posterior / post_sum
-                new_word_topic = np.random.multinomial(1, pvals=normalized_post)  # possibly need 2 copy the util.sample from Das
+                new_word_topic = np.random.multinomial(1, pvals=normalized_post)
                 # print 'multinomial with reg-norm', new_word_topic
 
                 self.word_topics[word] = np.argmax(new_word_topic)
                 self.doc_topic_CT = self.update_document_topic_counts(word, self.word_topics[word], "+")
                 self.recalculate_topic_params(self.word_topics[word], self.doc_topic_CT)
 
-        # init = False
         return None
 
     def draw_new_wt_assgns(self, word, topic_id, new_doc=False, wvmodel=None):
+        """
+        Log of the probablity density function for the Student-T Distribution
+
+        Provides a PDF for a word (really a word-vector) in a given topic distribution.
+
+        :param word: string of the word to find probabilty of word-topic assignment
+        :param topic_id: Interger, a topic id to reference a topic distribution and its params
+        :param new_doc: False (default), optional.  True if predicting topics from unseen document/not currently training
+        :param wvmodel: None by default.  If predicting topics from an unseen document, requires a loaded word2vec model
+        from GenSim
+        :type wvmodel: gensim.models.word2vec.Word2Vec
+        :return: log of PDF from t-distribution for a given word.  Type: Float
+        """
 
         if new_doc == False:
             # Getting params for calculating PDF of T-Dist for a word
@@ -182,7 +209,12 @@ class Gauss_LDA(object):
 
 
     def recalculate_topic_params(self, topic_id, topic_counts):
+        """
 
+        :param topic_id:
+        :param topic_counts:
+        :return:
+        """
         topic_count = np.sum(topic_counts[:, topic_id], axis=0)  # N_k
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
@@ -204,29 +236,34 @@ class Gauss_LDA(object):
         return topic_mean, topic_cov
 
     def get_scaled_topic_MC(self, topic_id, topic_count):
-        # get words assigned to topic_id
+        """
+        For a given topic, method calculates scaled topic Mean and Covariance (V-bar_k and C_k in R. Das Paper)
 
-        topic_vecs = []
+        \sum_d \sum_z=i (V_di) / N_k
+        ^^ =
+        wordvec_sum = array[zero] > shape(word-vec dimensionality)
+        for each doc:
+                for each word that has topic assignment i:
+                    wordvec_sum + word
+        wordvec_sum / count of topic
+        N_k = count of topic occurences across all documents
+
+        :param topic_id: The topic ID, integer
+        :param topic_count: A copy of the document-topic counts table, numpy array
+        :return: mean and covariance matrix.  Mean will be of shape (1 X word-vector dimension).
+        Covariance will be matrix of size (word-vector dim X word-vector dim)
+        """
+        topic_vecs = []  # creating a matrix of word-vecs assigned to topic_id
         for docID, doc in self.corpus.iteritems():
             for word in doc:
-                # print word, topic_id, self.word_topics[word}, "word, topic id, wordtopic assignment"
-                # print self.word_topics[word]
                 if self.word_topics[word] == topic_id:
                     topic_vecs.append(self.word_vecs[word])
-
-        # if len(topic_vecs) < 2: # DEBUGGING.. turned out topic-assgns were whack
-        #     print 'I DONE BROKE \n HE HAW'
-        #     print topic_id, "TOPIC ID"
-        #     print self.word_topics
-        #     print len(topic_vecs), 'LEN WORD VEC'
-        #     self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
-        #     self.get_scaled_topic_MC(topic_id, topic_count)
 
         topic_vecs = np.vstack(topic_vecs)
         mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
 
         mean_centered = topic_vecs - mean
-        cov = mean_centered.T.dot(mean_centered)
+        cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
         return mean, cov
 
 
@@ -237,7 +274,7 @@ class Gauss_LDA(object):
         :param operation: '-' for subracting contribution | '+' for adding contribution
         :return: a new document-topic table (copy)
         Method only affects a copy of the ground truth
-        Counts how many times each topic is assigned to a word in a document.  is a Doc X Topic array/matrix
+        Counts how many times each topic is assigned to a word in a document.  is a (Doc X Topic) array/matrix
         """
         # topicID = self.word_topics[word]
         topic_counts = np.copy(self.doc_topic_CT)
@@ -260,15 +297,15 @@ class Gauss_LDA(object):
         Method removes words in doc that are not in the Word2Vec corpus, and extracts word-topic assignments for each
         word by drawing densities from the multivariate student-T distribution.  Uses MLE method.
         """
-
-        # clean out words in doc that are not in the word-vec space
+        assert wv_model.vector_size == self.word_vec_size, "word-vector dimensionality does not match trained topic" \
+                                                           "distribution dimensions({0})".format(self.word_vec_size)
         filtered_doc = []
         nkd = defaultdict(float)
         for word in doc.split():
             try:
                 wv_model[word]
-                filtered_doc.append(word)
-                nkd[self.word_topics[word]] += 1
+                filtered_doc.append(word) # Remove words from doc that are not in word-vec model
+                nkd[self.word_topics[word]] += 1.
             except KeyError: continue
         print "{} words removed from doc".format(len(filtered_doc) - len(doc.split()))
         word_topics = []
