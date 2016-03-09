@@ -1,12 +1,16 @@
 from __future__ import division
+
+import random
+from collections import defaultdict, Counter
+
 import gensim
 import numpy as np
 from numpy import log, pi
-from scipy.special import gammaln
-import random
 from scipy import linalg
-from collections import defaultdict, Counter
+from scipy.special import gammaln
+
 import cholesky
+
 __author__ = "Michael Mansour"
 
 
@@ -97,7 +101,7 @@ class Gauss_LDA(object):
         print "Word-vectors for the corpus are created"
 
     def fit(self, iterations=1, init=True):
-        if init == True:
+        if init:
             self.init()
             init = False
 
@@ -138,9 +142,9 @@ class Gauss_LDA(object):
                 # self.recalculate_topic_params(self.word_topics[word])
 
                 posterior = []
-                max = 0
+                # max = 0
                 for k in range(self.numtopics):  # start getting the pdf's for each word-topic assignment
-                    print "lower tri, in sample", self.topic_params[k]["Lower Triangle"]
+                    # print "lower tri, in sample", self.topic_params[k]["Lower Triangle"]
                     topic_counts = self.update_document_topic_counts(word, k, "-")  # subtracting info about current word-topic assignment from doc-topic count table
                     self.recalculate_topic_params(k, topic_counts, init=False)
 
@@ -149,7 +153,7 @@ class Gauss_LDA(object):
                     # print "Nkd = {}".format(Nkd)
                     log_posterior = log(Nkd + self.alpha) * log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
                     posterior.append(log_posterior)  # doing this for some normalization scheme
-                    if log_posterior > max: max = log_posterior  # copied from R. Das code, not actually used here
+                    # if log_posterior > max: max = log_posterior  # copied from R. Das code, not actually used here
 
                 posterior.append(0.)  # just a little hitch in function. It wants a zero at the end, otherwise it may say sum(pvals) != 1.0.
                 post_sum = np.sum(posterior)
@@ -178,13 +182,12 @@ class Gauss_LDA(object):
         :return: log of PDF from t-distribution for a given word.  Type: Float
         """
 
-        if new_doc == False:
+        if not new_doc:
             # Getting params for calculating PDF of T-Dist for a word
             # inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
-            cov_det = self.topic_params[topic_id]["Covariance Determinant"]  #cov_det is already logged
+            cov_det = self.topic_params[topic_id]["Chol Det"]  #cov_det is already logged
 
             Nk = self.topic_params[topic_id]["Topic Count"]
-
             # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
             centered = self.word_vecs[word] - self.topic_params[topic_id]["Topic Mean"]
 
@@ -197,51 +200,52 @@ class Gauss_LDA(object):
 
             # Log PDF of multivariate student-T distribution
             log_prob = gammaln(nu + d / 2.) - \
-                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp ) / nu))
+                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * np.log(cov_det) + ((nu + d) / 2.) * log((1. + LLcomp ) / nu))
 
             return log_prob
 
-        if new_doc == True:
+        if new_doc:
             # inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
-            cov_det = self.topic_params[topic_id]["Covariance Determinant"]
+            cov_det = self.topic_params[topic_id]["Chol Det"]
             Nk = self.topic_params[topic_id]["Topic Count"]
-            centered = wvmodel[word] - self.priors.mu
+            centered = self.word_vecs[word] - self.topic_params[topic_id]["Topic Mean"]
 
-            LLcomp = centered.T.dot(inv_cov).dot(centered)
+            cholesky_solution = linalg.cho_solve((self.topic_params[topic_id]["Lower Triangle"], True), centered)
+            LLcomp = cholesky_solution.T.dot(cholesky_solution)
             d = wvmodel.vector_size
             nu = self.priors.nu + Nk - d + 1.
             log_prob = gammaln((nu + d) / 2.) - \
-                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * cov_det[1] + ((nu + d) / 2.) * log((1. + LLcomp )/ nu))
+                       (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * np.log(cov_det) + ((nu + d) / 2.) * log((1. + LLcomp )/ nu))
             return log_prob
 
 
     def recalculate_topic_params(self, topic_id, topic_counts, init=False):
         """
 
-        :param topic_id:
-        :param topic_counts:
+        :param topic_id: index for topic
+        :param topic_counts: a copy of the doc-topic count table
         :return:
         """
         topic_count = np.sum(topic_counts[:, topic_id], axis=0)  # N_k
-        print "topic count", topic_count
+        # print "topic count", topic_count
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
         scaled_topic_mean_K, scaled_topic_cov_K  = self.get_scaled_topic_MC(topic_id, topic_counts)  # V-Bar_k and C_k
-        vk_mu = scaled_topic_mean_K - self.priors.mu # V-bar_k - Mu
+        # vk_mu = scaled_topic_mean_K - self.priors.mu # V-bar_k - Mu
 
-        psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu))  # Psi_k
+        # psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu))  # Psi_k
 
         topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * scaled_topic_mean_K)) / kappa_k  # Mu_k
-        topic_cov = psi_k / (nu_k - self.word_vec_size + 1.)  # Sigma_k
+        # topic_cov = psi_k / (nu_k - self.word_vec_size + 1.)  # Sigma_k
         # gettting the Cholesky fast determinant of the lower triagnle (for the det of cov)
 
-        if init == True:
+        if init:
             # self.topic_params[topic_id]["Lower Triangle"] = linalg.cholesky(topic_cov, lower=True)
             self.topic_params[topic_id]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True)
         L = self.topic_params[topic_id]["Lower Triangle"]
-        print init
-        print "lower triangle", L
-        print L.shape
+        # print init
+        # print "lower triangle", L
+        # print L.shape
 
         # cant just take log of trace since log(x) + log(x) != log(2x)
         chol_det = 0.0
@@ -253,11 +257,8 @@ class Gauss_LDA(object):
         self.topic_params[topic_id]["Topic Count"] = topic_count
         self.topic_params[topic_id]["Topic Kappa"] = kappa_k
         self.topic_params[topic_id]["Topic Nu"] = nu_k
-        self.topic_params[topic_id]["Topic Mean"], self.topic_params[topic_id]["Topic Covariance"] = topic_mean, topic_cov
-        # self.topic_params[topic_id]["Inverse Covariance"] = np.linalg.inv(topic_cov)
-        # self.topic_params[topic_id]["Covariance Determinant"] = np.linalg.slogdet(topic_cov) # regular determinant calculator breaks with super small numbers
+        self.topic_params[topic_id]["Topic Mean"]= topic_mean
 
-        return topic_mean, topic_cov
 
     def get_scaled_topic_MC(self, topic_id, topic_count):
         """
@@ -286,8 +287,9 @@ class Gauss_LDA(object):
         topic_vecs = np.vstack(topic_vecs)
         mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
 
-        mean_centered = topic_vecs - mean
-        cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
+        # mean_centered = topic_vecs - mean
+        # cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
+        cov = None
         return mean, cov
 
 
@@ -363,4 +365,4 @@ if __name__ == "__main__":
 
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     g = Gauss_LDA(2, corpus, wordvec_fileapth)
-    g.fit(100)
+    g.fit(15)

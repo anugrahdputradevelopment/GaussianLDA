@@ -1,4 +1,5 @@
 import numpy as np
+from choldate import choldowndate, cholupdate
 from numpy.linalg import cholesky
 
 
@@ -25,8 +26,8 @@ class Helper(object):
             L[k, k] = r
 
             for i in range(k+1, X.shape[0]):
-                L[i, k] = (L[i, k] + s * X[i]) / c
-                X[i] = c * X[i] - s * ((L[i, k] + s * X[i]) / c)
+                L[i, k] = (L[i, k] + (s * X[i])) / c
+                X[i] = (c * X[i]) - (s * L[i, k])
 
         return L
 
@@ -47,7 +48,7 @@ class Helper(object):
             L[k, k] = r
 
             for i in range(k+1, X.shape[0]):
-                L[i, k] = (L[i, k] - s * X[i]) / c
-                X[i] = c * X[i] - s * ((L[i, k] - s * X[i]) / c)
+                L[i, k] = (L[i, k] - (s * X[i])) / c
+                X[i] = (c * X[i]) - (s * L[i, k])
 
         return L

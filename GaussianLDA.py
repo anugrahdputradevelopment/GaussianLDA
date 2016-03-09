@@ -94,7 +94,7 @@ class Gauss_LDA(object):
         print "Word-vectors for the corpus are created"
 
     def fit(self, iterations=1, init=True):
-        if init == True:
+        if init:
             self.init()
             init = False
 
@@ -174,7 +174,7 @@ class Gauss_LDA(object):
         :return: log of PDF from t-distribution for a given word.  Type: Float
         """
 
-        if new_doc == False:
+        if not new_doc:
             # Getting params for calculating PDF of T-Dist for a word
             inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
             cov_det = self.topic_params[topic_id]["Covariance Determinant"]  #cov_det is already logged
@@ -195,7 +195,7 @@ class Gauss_LDA(object):
 
             return log_prob
 
-        if new_doc == True:
+        if new_doc:
             inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
             cov_det = self.topic_params[topic_id]["Covariance Determinant"]
             Nk = self.topic_params[topic_id]["Topic Count"]
