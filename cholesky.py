@@ -18,6 +18,7 @@ class Helper(object):
         """
 
         assert L.shape[1] == X.shape[0], "cholesky lower triangle matrix dim != word vec dim"
+        # cholupdate(L.T, X)
 
         for k in range(X.shape[0]):
             r = np.sqrt(L[k, k]**2 + X[k]**2)
@@ -29,7 +30,7 @@ class Helper(object):
                 L[i, k] = (L[i, k] + (s * X[i])) / c
                 X[i] = (c * X[i]) - (s * L[i, k])
 
-        return L
+        return L.T
 
 
     def chol_downdate(self, L, X):
@@ -40,6 +41,7 @@ class Helper(object):
         :return: updated lower triangle matrix
         """
         assert L.shape[1] == X.shape[0]
+        # choldowndate(L.T, X)
 
         for k in range(X.shape[0]):
             r = np.sqrt(L[k, k]**2 - X[k]**2)
@@ -50,5 +52,6 @@ class Helper(object):
             for i in range(k+1, X.shape[0]):
                 L[i, k] = (L[i, k] - (s * X[i])) / c
                 X[i] = (c * X[i]) - (s * L[i, k])
-
-        return L
+        if np.isnan(r):
+            print "YOU GOT NANAANANA"
+        return L.T

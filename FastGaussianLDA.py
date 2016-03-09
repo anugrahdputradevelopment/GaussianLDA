@@ -142,7 +142,6 @@ class Gauss_LDA(object):
                 # self.recalculate_topic_params(self.word_topics[word])
 
                 posterior = []
-                # max = 0
                 for k in range(self.numtopics):  # start getting the pdf's for each word-topic assignment
                     # print "lower tri, in sample", self.topic_params[k]["Lower Triangle"]
                     topic_counts = self.update_document_topic_counts(word, k, "-")  # subtracting info about current word-topic assignment from doc-topic count table
@@ -153,13 +152,10 @@ class Gauss_LDA(object):
                     # print "Nkd = {}".format(Nkd)
                     log_posterior = log(Nkd + self.alpha) * log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
                     posterior.append(log_posterior)  # doing this for some normalization scheme
-                    # if log_posterior > max: max = log_posterior  # copied from R. Das code, not actually used here
 
                 posterior.append(0.)  # just a little hitch in function. It wants a zero at the end, otherwise it may say sum(pvals) != 1.0.
-                post_sum = np.sum(posterior)
-                normalized_post = posterior / post_sum
+                normalized_post = posterior / np.sum(posterior)
                 new_word_topic = np.random.multinomial(1, pvals=normalized_post)
-                # print 'multinomial with reg-norm', new_word_topic
 
                 self.word_topics[word] = np.argmax(new_word_topic)
                 self.doc_topic_CT = self.update_document_topic_counts(word, self.word_topics[word], "+")
@@ -184,16 +180,15 @@ class Gauss_LDA(object):
 
         if not new_doc:
             # Getting params for calculating PDF of T-Dist for a word
-            # inv_cov = self.topic_params[topic_id]["Inverse Covariance"]
-            cov_det = self.topic_params[topic_id]["Chol Det"]  #cov_det is already logged
+            cov_det = self.topic_params[topic_id]["Chol Det"]
 
             Nk = self.topic_params[topic_id]["Topic Count"]
             # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
             centered = self.word_vecs[word] - self.topic_params[topic_id]["Topic Mean"]
 
-            cholesky_solution = linalg.cho_solve((self.topic_params[topic_id]["Lower Triangle"], True), centered)
-            LLcomp = cholesky_solution.T.dot(cholesky_solution)
-            # LLcomp = centered.dot(inv_cov).dot(centered.T)  # for some topics, this outputs a negative value // CHANGED TO BELOW
+            linalg.cho_solve((self.topic_params[topic_id]["Lower Triangle"], True), centered.T, overwrite_b=True) #  In place will run much faster
+            # LLcomp = centered.T.dot(centered)
+            LLcomp = centered.dot(centered)
             # SHOULD THSI BE CENTERD.DOT(INV_COV).DOT(CENTERED.T))????
             d = self.word_vec_size   # dimensionality of word vector
             nu = self.priors.nu + Nk - d + 1.
@@ -224,7 +219,7 @@ class Gauss_LDA(object):
 
         :param topic_id: index for topic
         :param topic_counts: a copy of the doc-topic count table
-        :return:
+        :return: None - sets internal class variables
         """
         topic_count = np.sum(topic_counts[:, topic_id], axis=0)  # N_k
         # print "topic count", topic_count
@@ -241,7 +236,8 @@ class Gauss_LDA(object):
 
         if init:
             # self.topic_params[topic_id]["Lower Triangle"] = linalg.cholesky(topic_cov, lower=True)
-            self.topic_params[topic_id]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True)
+            self.topic_params[topic_id]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True,
+                                                                            check_finite=False)
         L = self.topic_params[topic_id]["Lower Triangle"]
         # print init
         # print "lower triangle", L
@@ -251,7 +247,6 @@ class Gauss_LDA(object):
         chol_det = 0.0
         for i in range(self.word_vec_size):
             chol_det += np.log(L[i, i])
-
 
         self.topic_params[topic_id]["Chol Det"] = chol_det * 2
         self.topic_params[topic_id]["Topic Count"] = topic_count
@@ -284,13 +279,17 @@ class Gauss_LDA(object):
                 if self.word_topics[word] == topic_id:
                     topic_vecs.append(self.word_vecs[word])
 
-        topic_vecs = np.vstack(topic_vecs)
-        mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
+        try:
+            topic_vecs = np.vstack(topic_vecs)
+            mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
 
         # mean_centered = topic_vecs - mean
         # cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
-        cov = None
-        return mean, cov
+            cov = None
+            return mean, cov
+        except ValueError:
+            print "topic assignments are whack"
+            return self.topic_params[topic_id]["Topic Mean"], None
 
 
     def update_document_topic_counts(self, word, topicID, operation):
@@ -307,19 +306,21 @@ class Gauss_LDA(object):
         L = self.topic_params[topicID]["Lower Triangle"]
         mean = self.topic_params[topicID]["Topic Mean"]
         kappa_k = self.topic_params[topicID]["Topic Kappa"]
-        scaled_centered_word = (self.word_vecs[word] - mean) * np.sqrt((kappa_k + 1) / kappa_k)
+        centered = self.word_vecs[word] - mean
+        scaled_centered_word = centered * np.sqrt((kappa_k + 1) / kappa_k)
 
         if operation == "-":
             for docID, doc in self.corpus.iteritems():
                 topic_counts[docID, topicID] - float(doc.count(word))
         #downdate rank 1 cholesky
-        self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_downdate(L, scaled_centered_word)
+        self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_downdate(L, centered)
+        # self.topic_params[topicID]["Lower Triangle"] =
 
         if operation == "+":
             for docID, doc in self.corpus.iteritems():
                 topic_counts[docID, topicID] + float(doc.count(word))
         # update chol rank 1 update
-        self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_update(L, scaled_centered_word)
+        self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_update(L, centered)
         return topic_counts
 
     def extract_topics_new_doc(self, doc, wv_model):
@@ -365,4 +366,4 @@ if __name__ == "__main__":
 
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     g = Gauss_LDA(2, corpus, wordvec_fileapth)
-    g.fit(15)
+    g.fit(25)
