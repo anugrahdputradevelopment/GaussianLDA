@@ -1,10 +1,13 @@
 from __future__ import division
-import gensim
-import numpy as np
-from numpy import log, pi
-from scipy.special import gammaln
+
 import random
 from collections import defaultdict, Counter
+
+import numpy as np
+from gensim.models import Word2Vec
+from numpy import log, pi
+from scipy.special import gammaln
+
 __author__ = "Michael Mansour"
 
 
@@ -72,7 +75,7 @@ class Gauss_LDA(object):
         """
 
         print "Processing word-vectors, this takes a moment"
-        vectors = gensim.models.Word2Vec.load_word2vec_format(fname=filepath, binary=False)
+        vectors = Word2Vec.load_word2vec_format(fname=filepath, binary=False)
         useable_vocab = 0
         unusable_vocab = 0
         self.word_vec_size = vectors.vector_size

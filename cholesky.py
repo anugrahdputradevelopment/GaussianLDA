@@ -30,7 +30,7 @@ class Helper(object):
                 L[i, k] = (L[i, k] + (s * X[i])) / c
                 X[i] = (c * X[i]) - (s * L[i, k])
 
-        return L.T
+        return L
 
 
     def chol_downdate(self, L, X):
@@ -42,16 +42,17 @@ class Helper(object):
         """
         assert L.shape[1] == X.shape[0]
         # choldowndate(L.T, X)
-
+        L_c = np.copy(L) # in-place computations are faster
         for k in range(X.shape[0]):
-            r = np.sqrt(L[k, k]**2 - X[k]**2)
-            c = r / L[k, k]
-            s = X[k] / L[k, k]
-            L[k, k] = r
+            r = np.sqrt(L_c[k, k]**2 - X[k]**2)
+            c = r / L_c[k, k]
+            s = X[k] / L_c[k, k]
+            L_c[k, k] = r
 
             for i in range(k+1, X.shape[0]):
-                L[i, k] = (L[i, k] - (s * X[i])) / c
-                X[i] = (c * X[i]) - (s * L[i, k])
+                L_c[i, k] = (L_c[i, k] - (s * X[i])) / c
+                X[i] = (c * X[i]) - (s * L_c[i, k])
         if np.isnan(r):
             print "YOU GOT NANAANANA"
-        return L.T
+            return L # good reason for making copy - return if downdate becomes unstable
+        return L_c

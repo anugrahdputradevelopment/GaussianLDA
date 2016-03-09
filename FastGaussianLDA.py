@@ -137,7 +137,6 @@ class Gauss_LDA(object):
 
         for docID, doc in self.corpus.iteritems():
             for word in doc:
-                # self.doc_topic_CT[docID, topic_id] - float(doc.count(word)) #expirmenting with -= vs -
                 # self.update_document_topic_counts(word, "-")
                 # self.recalculate_topic_params(self.word_topics[word])
 
@@ -149,7 +148,6 @@ class Gauss_LDA(object):
 
                     log_pdf = self.draw_new_wt_assgns(word, k)
                     Nkd = topic_counts[docID, k] # Count of topic in doc
-                    # print "Nkd = {}".format(Nkd)
                     log_posterior = log(Nkd + self.alpha) * log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
                     posterior.append(log_posterior)  # doing this for some normalization scheme
 
@@ -181,14 +179,13 @@ class Gauss_LDA(object):
         if not new_doc:
             # Getting params for calculating PDF of T-Dist for a word
             cov_det = self.topic_params[topic_id]["Chol Det"]
-
             Nk = self.topic_params[topic_id]["Topic Count"]
-            # Precalculating some terms (V_di - Mu)^T * Cov^-1 * (V_di - Mu)
+            # Precalculating some terms (V_di - Mu)
             centered = self.word_vecs[word] - self.topic_params[topic_id]["Topic Mean"]
-
-            linalg.cho_solve((self.topic_params[topic_id]["Lower Triangle"], True), centered.T, overwrite_b=True) #  In place will run much faster
+            # (L^-1b)^T(L^-1b) _
+            linalg.cho_solve((self.topic_params[topic_id]["Lower Triangle"], True), centered, overwrite_b=True)
             # LLcomp = centered.T.dot(centered)
-            LLcomp = centered.dot(centered)
+            LLcomp = centered.T.dot(centered)
             # SHOULD THSI BE CENTERD.DOT(INV_COV).DOT(CENTERED.T))????
             d = self.word_vec_size   # dimensionality of word vector
             nu = self.priors.nu + Nk - d + 1.
@@ -213,7 +210,6 @@ class Gauss_LDA(object):
                        (gammaln(nu / 2.) + d/2. * (log(nu) + log(pi)) +0.5 * np.log(cov_det) + ((nu + d) / 2.) * log((1. + LLcomp )/ nu))
             return log_prob
 
-
     def recalculate_topic_params(self, topic_id, topic_counts, init=False):
         """
 
@@ -222,12 +218,10 @@ class Gauss_LDA(object):
         :return: None - sets internal class variables
         """
         topic_count = np.sum(topic_counts[:, topic_id], axis=0)  # N_k
-        # print "topic count", topic_count
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
         scaled_topic_mean_K, scaled_topic_cov_K  = self.get_scaled_topic_MC(topic_id, topic_counts)  # V-Bar_k and C_k
         # vk_mu = scaled_topic_mean_K - self.priors.mu # V-bar_k - Mu
-
         # psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu))  # Psi_k
 
         topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * scaled_topic_mean_K)) / kappa_k  # Mu_k
@@ -239,14 +233,11 @@ class Gauss_LDA(object):
             self.topic_params[topic_id]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True,
                                                                             check_finite=False)
         L = self.topic_params[topic_id]["Lower Triangle"]
-        # print init
-        # print "lower triangle", L
-        # print L.shape
 
-        # cant just take log of trace since log(x) + log(x) != log(2x)
-        chol_det = 0.0
-        for i in range(self.word_vec_size):
-            chol_det += np.log(L[i, i])
+        chol_det = np.sum(np.log(np.diag(L))) #  2 * sum_m_i(log(L_i,i))
+        # chol_det = 0.0
+        # for i in np.diag(L):
+        #     chol_det += np.log(i)
 
         self.topic_params[topic_id]["Chol Det"] = chol_det * 2
         self.topic_params[topic_id]["Topic Count"] = topic_count
@@ -285,11 +276,11 @@ class Gauss_LDA(object):
 
         # mean_centered = topic_vecs - mean
         # cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
-            cov = None
+            cov = 1.
             return mean, cov
         except ValueError:
             print "topic assignments are whack"
-            return self.topic_params[topic_id]["Topic Mean"], None
+            return self.topic_params[topic_id]["Topic Mean"], 1.
 
 
     def update_document_topic_counts(self, word, topicID, operation):
@@ -301,20 +292,18 @@ class Gauss_LDA(object):
         Method only affects a copy of the ground truth
         Counts how many times each topic is assigned to a word in a document.  is a (Doc X Topic) array/matrix
         """
-        # topicID = self.word_topics[word]
         topic_counts = np.copy(self.doc_topic_CT)
-        L = self.topic_params[topicID]["Lower Triangle"]
+        L = np.copy(self.topic_params[topicID]["Lower Triangle"])
         mean = self.topic_params[topicID]["Topic Mean"]
         kappa_k = self.topic_params[topicID]["Topic Kappa"]
         centered = self.word_vecs[word] - mean
-        scaled_centered_word = centered * np.sqrt((kappa_k + 1) / kappa_k)
+        # scaled_centered_word = centered * np.sqrt((kappa_k + 1) / kappa_k)
 
         if operation == "-":
             for docID, doc in self.corpus.iteritems():
                 topic_counts[docID, topicID] - float(doc.count(word))
         #downdate rank 1 cholesky
         self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_downdate(L, centered)
-        # self.topic_params[topicID]["Lower Triangle"] =
 
         if operation == "+":
             for docID, doc in self.corpus.iteritems():
@@ -363,7 +352,6 @@ if __name__ == "__main__":
     corpus = ["apple orange mango melon ", "canvas art mural paint painting ", "pineapple kiwi grape strawberry ",
               "picture frame picasso sculpture art ", "coconut guava blueberry blackberry ", "statue monument art artist "]
     corpus = [sent * 5 for sent in corpus]*4
-
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     g = Gauss_LDA(2, corpus, wordvec_fileapth)
-    g.fit(25)
+    g.fit(30)
