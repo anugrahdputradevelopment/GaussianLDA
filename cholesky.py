@@ -1,10 +1,10 @@
 import numpy as np
 from choldate import choldowndate, cholupdate
 from numpy.linalg import cholesky
-
+from numba import jit
 
 class Helper(object):
-
+    @jit(cache=True)
     def chol_update(self, L, X):
         """
         Cholesky Rank 1 Update
@@ -17,7 +17,7 @@ class Helper(object):
         :return: updated lower triangle matrix
         """
 
-        assert L.shape[1] == X.shape[0], "cholesky lower triangle matrix dim != word vec dim"
+        # assert L.shape[1] == X.shape[0], "cholesky lower triangle matrix dim != word vec dim"
         # cholupdate(L.T, X)
         L_c = np.copy(L)
         for k in range(X.shape[0]):
@@ -33,7 +33,7 @@ class Helper(object):
             print "Your updater sucks, you have nans or infs"; return L
         return L_c
 
-
+    @jit(cache=True)
     def chol_downdate(self, L, X):
         """
         Cholesky Rank 1 Update
@@ -41,7 +41,7 @@ class Helper(object):
         :param X: Word Vector with same column dimensionality as L
         :return: updated lower triangle matrix
         """
-        assert L.shape[1] == X.shape[0]
+        # assert L.shape[1] == X.shape[0]
         # choldowndate(L.T, X)
         L_c = np.copy(L) # in-place computations are faster
         for k in range(X.shape[0]):

@@ -1,8 +1,9 @@
 from __future__ import division
 
 import random
+import time
 from collections import defaultdict, Counter
-
+from numba import jit, jitclass
 import gensim
 import numpy as np
 from numpy import log, pi
@@ -33,7 +34,7 @@ class Wishart(object):
 
 class Gauss_LDA(object):
 
-    def __init__(self, num_topics, corpus, word_vector_filepath):
+    def __init__(self, num_topics, corpus, word_vector_filepath=None, word_vector_model=None):
         self.doc_topic_CT = None
         self.word_topics = {}
         self.corpus = corpus
@@ -47,6 +48,8 @@ class Gauss_LDA(object):
         self.word_vec_size = None
         self.alpha = 50. / self.numtopics
         self.solver = cholesky.Helper()
+        self.wvmodel = word_vector_model
+
 
 
     def process_corpus(self, documents):
@@ -66,7 +69,7 @@ class Gauss_LDA(object):
         print "Done processing corpus with {} documents".format(len(documents))
 
 
-    def process_wordvectors(self, filepath):
+    def process_wordvectors(self, filepath=None):
         """
         Takes a trained Word2Vec model, tests each word in vocab against it, and only keeps word vectors that
         are in your document corpus, and that are in the word2vec corpus.
@@ -77,28 +80,48 @@ class Gauss_LDA(object):
         number of tokens trained on & dimensionality of word-vectors
         :return: None - sets class-variable (self.word_vecs) to be a dict{word: word-vector}
         """
+        if filepath:
+            print "Processing word-vectors, this takes a moment"
+            vectors = gensim.models.Word2Vec.load_word2vec_format(fname=filepath, binary=False)
+            useable_vocab = 0
+            unusable_vocab = 0
+            self.word_vec_size = vectors.vector_size
 
-        print "Processing word-vectors, this takes a moment"
-        vectors = gensim.models.Word2Vec.load_word2vec_format(fname=filepath, binary=False)
-        useable_vocab = 0
-        unusable_vocab = 0
-        self.word_vec_size = vectors.vector_size
+            for word in self.vocab:
+                try:
+                    vectors[word]
+                    useable_vocab += 1
+                except KeyError: unusable_vocab += 1
 
-        for word in self.vocab:
-            try:
-                vectors[word]
-                useable_vocab += 1
-            except KeyError: unusable_vocab += 1
+            print "There are {0} words that could be convereted to word vectors in your corpus \n" \
+                  "There are {1} words that could NOT be converted to word vectors".format(useable_vocab, unusable_vocab)
 
-        print "There are {0} words that could be convereted to word vectors in your corpus \n" \
-              "There are {1} words that could NOT be converted to word vectors".format(useable_vocab, unusable_vocab)
+            for word in self.vocab:
+                try:
+                    self.word_vecs[word] = vectors[word]  # Dict{Word: Word-Vector}
+                except KeyError: continue  # TODO: remove words from document if they're not in the word-vec corpus
 
-        for word in self.vocab:
-            try:
-                self.word_vecs[word] = vectors[word]  # Dict{Word: Word-Vector}
-            except KeyError: continue  # TODO: remove words from document if they're not in the word-vec corpus
+            print "Word-vectors for the corpus are created"
+        else:
 
-        print "Word-vectors for the corpus are created"
+            useable_vocab = 0
+            unusable_vocab = 0
+            self.word_vec_size = self.wvmodel.vector_size
+
+            for word in self.vocab:
+                try:
+                    self.wvmodel[word]
+                    useable_vocab += 1
+                except KeyError: unusable_vocab += 1
+
+            print "There are {0} words that could be convereted to word vectors in your corpus \n" \
+                  "There are {1} words that could NOT be converted to word vectors".format(useable_vocab, unusable_vocab)
+
+            for word in self.vocab:
+                try:
+                    self.word_vecs[word] = self.wvmodel[word]  # Dict{Word: Word-Vector}
+                except KeyError: continue  # TODO: remove words from document if they're not in the word-vec corpus
+
 
     def fit(self, iterations=1, init=True):
         if init:
@@ -113,6 +136,7 @@ class Gauss_LDA(object):
     def init(self):
 
         self.process_corpus(self.corpus)
+
         self.process_wordvectors(self.wordvecFP)
         self.priors = Wishart(self.word_vecs)  # set wishhart priors
         self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))
@@ -353,5 +377,7 @@ if __name__ == "__main__":
               "picture frame picasso sculpture art ", "coconut guava blueberry blackberry ", "statue monument art artist "]
     corpus = [sent * 5 for sent in corpus]*4
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
+    start = time.time()
     g = Gauss_LDA(2, corpus, wordvec_fileapth)
     g.fit(30)
+    print time.time() - start
