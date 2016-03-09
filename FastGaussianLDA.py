@@ -203,7 +203,7 @@ class Gauss_LDA(object):
             centered = self.word_vecs[word] - self.topic_params[topic_id]["Topic Mean"]
 
             cholesky_solution = linalg.cho_solve((self.topic_params[topic_id]["Lower Triangle"], True), centered)
-            LLcomp = cholesky_solution.T.dot(cholesky_solution)
+            LLcomp = cholesky_solution.T.dot(cholesky_solution) # TODO: update to be like loop above
             d = wvmodel.vector_size
             nu = self.priors.nu + Nk - d + 1.
             log_prob = gammaln((nu + d) / 2.) - \
