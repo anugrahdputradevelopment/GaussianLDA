@@ -90,18 +90,14 @@ class Gauss_LDA(object):
             for word in self.vocab:
                 try:
                     vectors[word]
+                    self.word_vecs[word] = vectors[word]
                     useable_vocab += 1
                 except KeyError: unusable_vocab += 1
 
             print "There are {0} words that could be convereted to word vectors in your corpus \n" \
                   "There are {1} words that could NOT be converted to word vectors".format(useable_vocab, unusable_vocab)
-
-            for word in self.vocab:
-                try:
-                    self.word_vecs[word] = vectors[word]  # Dict{Word: Word-Vector}
-                except KeyError: continue  # TODO: remove words from document if they're not in the word-vec corpus
-
             print "Word-vectors for the corpus are created"
+
         else:
 
             useable_vocab = 0
@@ -111,17 +107,12 @@ class Gauss_LDA(object):
             for word in self.vocab:
                 try:
                     self.wvmodel[word]
+                    self.word_vecs[word] = self.wvmodel[word]
                     useable_vocab += 1
                 except KeyError: unusable_vocab += 1
 
             print "There are {0} words that could be convereted to word vectors in your corpus \n" \
                   "There are {1} words that could NOT be converted to word vectors".format(useable_vocab, unusable_vocab)
-
-            for word in self.vocab:
-                try:
-                    self.word_vecs[word] = self.wvmodel[word]  # Dict{Word: Word-Vector}
-                except KeyError: continue  # TODO: remove words from document if they're not in the word-vec corpus
-
 
     def fit(self, iterations=1, init=True):
         if init:
@@ -289,13 +280,18 @@ class Gauss_LDA(object):
         Covariance will be matrix of size (word-vector dim X word-vector dim)
         """
         topic_vecs = []  # creating a matrix of word-vecs assigned to topic_id
+        # possible speed up here?
+        # selected_words = set([k if k[v] == topic_id for k,v in self.word_topics.iteritems()])
+
         for docID, doc in self.corpus.iteritems():
-            for word in doc:
+            for word in doc: #  this could be sped up with set-intersections?
                 if self.word_topics[word] == topic_id:
                     topic_vecs.append(self.word_vecs[word])
-
+        # TODO: fix this vstacking crap.  consider indexing?
         try:
-            topic_vecs = np.vstack(topic_vecs)
+            # topic_vecs = np.vstack(topic_vecs)
+            # topic_vecs = np.array(topic_vecs)
+            np.array(topic_vecs, copy=False) #  Even faster!
             mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
 
         # mean_centered = topic_vecs - mean
@@ -326,7 +322,7 @@ class Gauss_LDA(object):
         if operation == "-":
             for docID, doc in self.corpus.iteritems():
                 topic_counts[docID, topicID] - float(doc.count(word))
-        #downdate rank 1 cholesky
+        # downdate rank 1 cholesky
         self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_downdate(L, centered)
 
         if operation == "+":
@@ -378,6 +374,6 @@ if __name__ == "__main__":
     corpus = [sent * 5 for sent in corpus]*4
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     start = time.time()
-    g = Gauss_LDA(2, corpus, wordvec_fileapth)
-    g.fit(30)
+    g = Gauss_LDA(2, corpus, word_vector_filepath=wordvec_fileapth)
+    g.fit(50)
     print time.time() - start
