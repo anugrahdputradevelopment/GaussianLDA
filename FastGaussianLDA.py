@@ -49,6 +49,7 @@ class Gauss_LDA(object):
         self.alpha = 50. / self.numtopics
         self.solver = cholesky.Helper()
         self.wvmodel = word_vector_model
+        self.doc_word_counts = {}
 
     def process_corpus(self, documents):
         """
@@ -65,7 +66,6 @@ class Gauss_LDA(object):
                 self.vocab.add(word)
         self.corpus = temp_corpus
         print "Done processing corpus with {} documents".format(len(documents))
-
 
     def process_wordvectors(self, filepath=None):
         """
@@ -147,15 +147,18 @@ class Gauss_LDA(object):
         self.word_topics = {word: random.choice(range(self.numtopics)) for word in self.vocab}
         # get Doc-Topic Counts
         for docID, doc in self.corpus.iteritems():
+            doc_word_count_temp = defaultdict(float)
             for word in doc:
                 topicID = self.word_topics[word]
+                doc_word_count_temp[word] += 1.
                 self.doc_topic_CT[docID, topicID] += 1. # TODO: SHOULD THIS BE + INSTEAD OF +=???
+                # print doc_word_count_temp
+            self.doc_word_counts[docID] = doc_word_count_temp
 
         for k in range(self.numtopics):  # Init parameters for topic distributions
             self.recalculate_topic_params(k, self.doc_topic_CT, init=True)
 
         print "Intialization complete"
-
     def sample(self):
         """
         Collapsed Gibbs Sampler derived from Steyver's method, adapted for continuous word-vectors
@@ -188,9 +191,6 @@ class Gauss_LDA(object):
             # if docID % 20 == 0: print "{0} docs sampled".format(docID)
                 print word
             print "########################\n ###############\n  #################", docID
-        # result_file = "~/Documents/GaussianLDA/output"
-        # with open()
-        # np.savetxt()
         return None
 
     def draw_new_wt_assgns(self, word, topic_id, new_doc=False, wvmodel=None):
@@ -252,7 +252,7 @@ class Gauss_LDA(object):
         topic_count = np.sum(topic_counts[:, topic_id], axis=0)  # N_k
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
-        scaled_topic_mean_K, scaled_topic_cov_K  = self.get_scaled_topic_MC(topic_id, topic_counts)  # V-Bar_k and C_k
+        scaled_topic_mean_K, scaled_topic_cov_K  = self.get_scaled_topic_MC(topic_id, topic_count)  # V-Bar_k and C_k
         # psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu))  # Psi_k
 
         topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * scaled_topic_mean_K)) / kappa_k  # Mu_k
@@ -289,20 +289,14 @@ class Gauss_LDA(object):
         :return: mean and covariance matrix.  Mean will be of shape (1 X word-vector dimension).
         Covariance will be matrix of size (word-vector dim X word-vector dim)
         """
-        topic_vecs = []  # creating a matrix of word-vecs assigned to topic_id
         selected_words = set([k for k, v in self.word_topics.iteritems() if v == topic_id])
         topic_vec = np.zeros(self.word_vec_size)
         for docID, doc in self.corpus.iteritems():
             for word in set(doc) & selected_words: #  this could be sped up with set-intersections?
-                # if self.word_topics[word] == topic_id:
-                    # topic_vecs.append(self.word_vecs[word])
+
                 topic_vec += self.word_vecs[word]
         try:
-            # np.array(topic_vecs, copy=False) #  Even faster!
-            # mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
-            mean = topic_vec / (np.sum(topic_count[:, topic_id], axis=0))
-        # mean_centered = topic_vecs - mean
-        # cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
+            mean = topic_vec / topic_count#(np.sum(topic_count[:, topic_id], axis=0)) #is this a redudency? looks like they call the same thing
             cov = 1.
             return mean, cov
         except ValueError:
@@ -327,13 +321,14 @@ class Gauss_LDA(object):
 
         if operation == "-":
             for docID, doc in self.corpus.iteritems():
-                topic_counts[docID, topicID] - float(doc.count(word))
+                # print float(self.doc_word_counts[docID][word])
+                topic_counts[docID, topicID] - self.doc_word_counts[docID][word]
         # downdate rank 1 cholesky
         self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_downdate(L, centered)
 
         if operation == "+":
             for docID, doc in self.corpus.iteritems():
-                topic_counts[docID, topicID] + float(doc.count(word))
+                topic_counts[docID, topicID] + self.doc_word_counts[docID][word]
         # update chol rank 1 update
         self.topic_params[topicID]["Lower Triangle"] = self.solver.chol_update(L, centered)
         return topic_counts
