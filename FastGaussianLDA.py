@@ -290,15 +290,17 @@ class Gauss_LDA(object):
         Covariance will be matrix of size (word-vector dim X word-vector dim)
         """
         topic_vecs = []  # creating a matrix of word-vecs assigned to topic_id
-        # selected_words = set([k if k[v] == topic_id for k,v in self.word_topics.iteritems()])
-
+        selected_words = set([k for k, v in self.word_topics.iteritems() if v == topic_id])
+        topic_vec = np.zeros(self.word_vec_size)
         for docID, doc in self.corpus.iteritems():
-            for word in doc: #  this could be sped up with set-intersections?
-                if self.word_topics[word] == topic_id:
-                    topic_vecs.append(self.word_vecs[word])
+            for word in set(doc) & selected_words: #  this could be sped up with set-intersections?
+                # if self.word_topics[word] == topic_id:
+                    # topic_vecs.append(self.word_vecs[word])
+                topic_vec += self.word_vecs[word]
         try:
-            np.array(topic_vecs, copy=False) #  Even faster!
-            mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
+            # np.array(topic_vecs, copy=False) #  Even faster!
+            # mean = np.sum(topic_vecs, axis=0) / (np.sum(topic_count[:, topic_id], axis=0))
+            mean = topic_vec / (np.sum(topic_count[:, topic_id], axis=0))
         # mean_centered = topic_vecs - mean
         # cov = mean_centered.T.dot(mean_centered)  # (V_dk - Mu)^T(V_dk - Mu)
             cov = 1.
