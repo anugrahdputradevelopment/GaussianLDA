@@ -104,6 +104,7 @@ class Gauss_LDA(object):
 
             for word in self.vocab:
                 try:
+                    # noinspection PyStatementEffect
                     self.wvmodel[word]
                     self.word_vecs[word] = self.wvmodel[word]
                     useable_vocab += 1
@@ -293,7 +294,6 @@ class Gauss_LDA(object):
         topic_vec = np.zeros(self.word_vec_size)
         for docID, doc in self.corpus.iteritems():
             for word in set(doc) & selected_words: #  this could be sped up with set-intersections?
-
                 topic_vec += self.word_vecs[word]
         try:
             mean = topic_vec / topic_count#(np.sum(topic_count[:, topic_id], axis=0)) #is this a redudency? looks like they call the same thing
@@ -303,7 +303,7 @@ class Gauss_LDA(object):
             print "topic assignments are whack"
             return self.topic_params[topic_id]["Topic Mean"], 1.
 
-
+    # noinspection PyStatementEffect
     def update_document_topic_counts(self, word, topicID, operation):
         """
         :param word: a word to recalculate document x topic count table
@@ -369,9 +369,9 @@ class Gauss_LDA(object):
         return word_topics
 
 if __name__ == "__main__":
-    corpus = ["apple orange mango melon ", "canvas art mural paint painting ", "pineapple kiwi grape strawberry ",
-              "picture frame picasso sculpture art ", "coconut guava blueberry blackberry ", "statue monument art artist "]
-    corpus = [sent * 5 for sent in corpus]*4
+    # corpus = ["apple orange mango melon ", "canvas art mural paint painting ", "pineapple kiwi grape strawberry ",
+    #           "picture frame picasso sculpture art ", "coconut guava blueberry blackberry ", "statue monument art artist "]
+    # corpus = [sent * 5 for sent in corpus]*4
 
     f = '/Users/michael/Documents/GaussianLDA/cleandocs.txt'
     with open(f, 'r') as fi:

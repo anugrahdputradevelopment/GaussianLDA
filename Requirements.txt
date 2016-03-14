@@ -1,0 +1,6 @@
+Latest versions of:
+
+Numpy
+Numba
+Gensim
+SciPy
