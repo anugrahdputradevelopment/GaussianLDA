@@ -7,7 +7,7 @@ import queue
 
 class VoseAlias(object):
 
-    def __init__(self, num):
+    def __init__(self, num): ##  num is the number of topics
         self.w = None #  np.array
         self.wsum = 0
         self.n = int
@@ -48,6 +48,7 @@ class VoseAlias(object):
         while len(small) and len(large):
             l = self.small.get()
             g = self.large.get()
+
             self.prob[l] = 1
             self.alias[g] = 1
 
