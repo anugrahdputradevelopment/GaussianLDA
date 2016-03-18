@@ -9,6 +9,7 @@ import numpy as np
 from numpy import log, pi
 from scipy import linalg
 from scipy.special import gammaln
+from sklearn.cluster import KMeans
 
 import cholesky
 
@@ -141,28 +142,43 @@ class Gauss_LDA(object):
         self.process_wordvectors(self.wordvecFP)
         self.priors = Wishart(self.word_vecs)  # set wishhart priors
         self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))  # TODO: set dtype to np.float64
-
+        centroids = self.smart_centroids()
         for k in range(self.numtopics):
-            self.topic_params[k]["Topic Sum"] = 0.0
+            self.topic_params[k]["Topic Sum"] = centroids[k]
+            self.topic_params[k]["Topic Mean"] = centroids[k]
 
         # get Doc-Topic Counts
         for docID in self.corpus.keys():
             for topic, word in zip(self.corpus[docID]['topics'], self.corpus[docID]['words']):
                 self.doc_topic_CT[docID, topic] += 1.  # Ndk
-                self.topic_params[topic]['Topic Sum'] += self.word_vecs[word]  # sum of topic vectors
+                # self.topic_params[topic]['Topic Sum'] += self.word_vecs[word]  # sum of topic vectors
+
 
         for k in range(self.numtopics):  # Init parameters for topic distributions
             # TODO: calculate also covar matrices
             Nk = np.sum(self.doc_topic_CT[:, k], axis=0)
             self.topic_params[k]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True,
                                                                      check_finite=True)
-            self.topic_params[k]["Topic Mean"] = self.topic_params[k]["Topic Sum"] / Nk
+            # self.topic_params[k]["Topic Mean"] = self.topic_params[k]["Topic Sum"] / Nk
+
             # 2 * sum_m_i(log(L_i,i))
             self.topic_params[k]["Chol Det"] = np.sum(np.log(np.diag(self.topic_params[k]["Lower Triangle"]))) * 2
             self.topic_params[k]["Topic Count"] = Nk
             self.topic_params[k]["Topic Kappa"] = self.priors.kappa + Nk
 
+
         print "Initialization complete"
+
+# ======================================================================================================================
+
+    def smart_centroids(self):
+        from sklearn.cluster import KMeans
+        vecs = []
+        for word in self.vocab:
+            vecs.append(self.word_vecs[word])
+        km = KMeans(n_clusters=self.numtopics, n_jobs=1)
+        km.fit(np.array(vecs))
+        return km.cluster_centers_
 
 # ======================================================================================================================
 
@@ -343,6 +359,8 @@ class Gauss_LDA(object):
         else:
             return None
 
+# ======================================================================================================================
+
     def extract_topics_new_doc(self, doc, wv_model):
         """
         :type wv_model: gensim.models.word2vec.Word2Vec
@@ -392,6 +410,6 @@ if __name__ == "__main__":
         fi.close()
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     start = time.time()
-    g = Gauss_LDA(20, docs, word_vector_filepath=wordvec_fileapth)
+    g = Gauss_LDA(15, docs, word_vector_filepath=wordvec_fileapth)
     g.fit(10)
     print time.time() - start
