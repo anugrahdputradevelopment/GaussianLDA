@@ -173,28 +173,30 @@ class Gauss_LDA(object):
         """
 
         for docID in self.corpus.keys():
-            for word, topic in zip(self.corpus[docID]['words'], self.corpus[docID]['topics']):
+            for idx in range(len(self.corpus[docID]['words'])):
+                word = self.corpus[docID]['words'][idx]
+                current_topic = self.corpus[docID]['topics'][idx]
 
-                self.recalculate_topic_params(word, topic, docID, "-")
-                posterior = []
+                self.recalculate_topic_params(word, current_topic, docID, "-")
+                log_posterior = np.zeros(self.numtopics)
                 for k in range(self.numtopics):  # Get PDF for each possible word-topic assignment
-
                     log_pdf = self.draw_new_wt_assgns(word, k)
                     Nkd = self.doc_topic_CT[docID, k]  # Count of topic in doc, Ndk
-                    log_posterior = log(
-                        Nkd + self.alpha) + log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
-                    posterior.append(log_posterior)
-                posterior -= np.mean(posterior)
-                posterior = np.exp(posterior)
-                normalized_post = posterior / np.sum(posterior)
-                new_word_topic = np.random.multinomial(1, pvals=normalized_post)
+                    log_posterior[k] = log(Nkd + self.alpha) + log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
 
-                self.corpus[docID][topic] = np.argmax(new_word_topic)
-                self.update_document_topic_counts(word, self.corpus[docID][topic], docID, "+")
-                self.recalculate_topic_params(word, self.corpus[docID][topic], docID, "+")
+                max_log_posterior = np.max(log_posterior)
+                log_posterior -= max_log_posterior
+                normalized_post = np.exp(log_posterior - np.log(np.sum(np.exp(log_posterior))))
+                new_topic = np.argmax(np.random.multinomial(1, pvals=normalized_post))
+
+                self.corpus[docID]['topics'][idx] = new_topic
+                self.update_document_topic_counts(word, new_topic, docID, "+")
+                self.recalculate_topic_params(word, new_topic, docID, "+")
+
             if docID % 20 == 0 and docID != 0:
                 print normalized_post
-                print new_word_topic
+                print log_posterior
+                print new_topic
                 print "{0} docs sampled".format(int(docID))
 
                 for k in range(self.numtopics):
@@ -215,18 +217,15 @@ class Gauss_LDA(object):
         topic_count = np.sum(self.doc_topic_CT[:, topic], axis=0)  # N_k
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
-        scaleT = (kappa_k+1.) / (kappa_k * (nu_k - self.word_vec_size + 1.))
+        scaleT = (kappa_k+1.) / (kappa_k * (nu_k - self.word_vec_size + 1.))  # Needed to convert L => covariance
 
         if operation == "-":  # Remove data point contribution to the topic distribution
             # Original equation is:
             #    \Sigma \leftarrow \Sigma - (k_0 + N + 1)/(k_0 + N)(X_{n} - \mu_{n-1})(X_{n} - \mu_{n-1})^T
-            # We will scale the co-variance to remove the effect of kappa before performing the rank-1 update and
-            # then we will rescale
             L = self.topic_params[topic]["Lower Triangle"]
-            L *= np.sqrt((kappa_k+1.) / (kappa_k+2.))  # Undo previous scaling (CUSTOM)
             centered = (self.word_vecs[word] - self.topic_params[topic]["Topic Mean"])  # Get rank-1 matrix from point
+            centered *= np.sqrt( (kappa_k+1.) / kappa_k)  # Scale for recursive downdate
             L = self.solver.chol_downdate(L, centered)  # Choleksy downdate
-            L *= np.sqrt((kappa_k+1.) / (kappa_k))  # Apply new scaling (CUSTOM)
             self.topic_params[topic]["Lower Triangle"] = L
 
             # Correct the mean for the removed point
@@ -240,13 +239,10 @@ class Gauss_LDA(object):
 
             # Original equation is:
             #    \Sigma \leftarrow \Sigma + (k_0 + N + 1)/(k_0 + N)(X_{n} - \mu_{n-1})(X_{n} - \mu_{n-1})^T
-            # We will scale the co-variance to remove the effect of kappa before performing the rank-1 update and
-            # then we will rescale
             L = self.topic_params[topic]["Lower Triangle"]
-            L *= np.sqrt((kappa_k-1) / kappa_k)  # Undo previous scaling (CUSTOM)
             centered = (self.word_vecs[word] - topic_mean)  # Get rank-1 matrix from point
+            centered *= np.sqrt(kappa_k / (kappa_k-1.))  # Scale for recursive update
             L = self.solver.chol_update(L, centered)  # Choleksy update
-            L *= np.sqrt((kappa_k+1) / kappa_k)  # Apply new scaling (CUSTOM)
             self.topic_params[topic]["Lower Triangle"] = L
 
         L = self.topic_params[topic]["Lower Triangle"]
@@ -276,7 +272,7 @@ class Gauss_LDA(object):
         :return: mean and covariance matrix.  Mean will be of shape (1 X word-vector dimension).
         Covariance will be matrix of size (word-vector dim X word-vector dim)
         """
-        scaled_topic_mean = self.topic_params[topic]["Topic Sum"] / float(topic_count)
+        scaled_topic_mean = self.topic_params[topic]["Topic Sum"] / float(topic_count) if topic_count > 0 else np.zeros(self.word_vec_size)
         return scaled_topic_mean
 
 # ======================================================================================================================
@@ -314,18 +310,22 @@ class Gauss_LDA(object):
         d = self.word_vec_size  # dimensionality of word vector
         kappa_k = self.topic_params[topic]["Topic Kappa"]
 
-        scaleT = np.sqrt((kappa_k + 1.) / kappa_k * (self.priors.nu - d + 1.))  # New
+        scaleT = np.sqrt((kappa_k + 1.) / kappa_k * (self.priors.nu - d + 1.))  # Covariance = chol / sqrt(scaleT)
         nu = self.priors.nu + Nk - d + 1.
 
-        linalg.cho_solve((self.topic_params[topic]["Lower Triangle"] * scaleT, True), centered, overwrite_b=True,
+        try:
+            linalg.cho_solve((self.topic_params[topic]["Lower Triangle"] * scaleT, True), centered, overwrite_b=True,
                  check_finite=True)
+        except:
+            print('Break here')
         # (L^-1b)^T(L^-1b)
         LLcomp = centered.T.dot(centered)
 
         # Log PDF of multivariate student-T distribution
-        log_prob = gammaln(nu + d / 2.) - \
-                   (gammaln(nu / 2.) + (d / 2.) * (log(nu) + log(pi)) + (0.5 * cov_det) + ((nu + d) / 2.) * log(
-                       (1. + LLcomp) / nu))
+        log_prob = \
+            gammaln((nu + d) / 2.) - \
+            (gammaln(nu / 2.) + (d / 2.) * (log(nu) + log(pi))
+            + (0.5 * cov_det) + ((nu + d) / 2.) * log(1. + LLcomp/nu))
         return log_prob
 
 # ======================================================================================================================
@@ -393,5 +393,5 @@ if __name__ == "__main__":
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     start = time.time()
     g = Gauss_LDA(20, docs, word_vector_filepath=wordvec_fileapth)
-    g.fit(5)
+    g.fit(10)
     print time.time() - start
