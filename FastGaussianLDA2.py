@@ -38,7 +38,6 @@ class Wishart(object):
 class Gauss_LDA(object):
     def __init__(self, num_topics, corpus, word_vector_filepath=None, word_vector_model=None):
         self.doc_topic_CT = None
-        self.word_topics = {}
         self.corpus = corpus
         self.priors = None
         self.word_vecs = {}
@@ -46,12 +45,12 @@ class Gauss_LDA(object):
         self.vocab = set([])
         self.topic_params = defaultdict(dict)
         self.wordvecFP = word_vector_filepath
-        self.word_index = {}
+        # self.word_index = {}
         self.word_vec_size = None
-        self.alpha = 50. / self.numtopics
+        self.alpha = 5. / self.numtopics
         self.solver = cholesky.Helper()
         self.wvmodel = word_vector_model
-        self.doc_word_counts = {}
+        # self.doc_word_counts = {}
 
 # ======================================================================================================================
 
@@ -63,6 +62,7 @@ class Gauss_LDA(object):
         """
 
         temp_corpus = defaultdict(dict)
+        random.shuffle(documents)  # making sure topics are formed semi-randomly
         for index, doc in enumerate(documents):
             words = doc.split()
             temp_corpus[index]['words'] = words
@@ -140,7 +140,7 @@ class Gauss_LDA(object):
 
         self.process_wordvectors(self.wordvecFP)
         self.priors = Wishart(self.word_vecs)  # set wishhart priors
-        self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))
+        self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))  # TODO: set dtype to np.float64
 
         for k in range(self.numtopics):
             self.topic_params[k]["Topic Sum"] = 0.0
@@ -152,13 +152,15 @@ class Gauss_LDA(object):
                 self.topic_params[topic]['Topic Sum'] += self.word_vecs[word]  # sum of topic vectors
 
         for k in range(self.numtopics):  # Init parameters for topic distributions
+            # TODO: calculate also covar matrices
+            Nk = np.sum(self.doc_topic_CT[:, k], axis=0)
             self.topic_params[k]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True,
                                                                      check_finite=True)
-            self.topic_params[k]["Topic Mean"] = self.topic_params[k]["Topic Sum"] / np.sum(self.doc_topic_CT[:, k],
-                                                                                            axis=0)
+            self.topic_params[k]["Topic Mean"] = self.topic_params[k]["Topic Sum"] / Nk
             # 2 * sum_m_i(log(L_i,i))
             self.topic_params[k]["Chol Det"] = np.sum(np.log(np.diag(self.topic_params[k]["Lower Triangle"]))) * 2
-            self.topic_params[k]["Topic Count"] = np.sum(self.doc_topic_CT[:, k], axis=0)
+            self.topic_params[k]["Topic Count"] = Nk
+            self.topic_params[k]["Topic Kappa"] = self.priors.kappa + Nk
 
         print "Initialization complete"
 
@@ -172,66 +174,93 @@ class Gauss_LDA(object):
 
         for docID in self.corpus.keys():
             for word, topic in zip(self.corpus[docID]['words'], self.corpus[docID]['topics']):
-                self.update_document_topic_counts(word, topic, docID, "-")
-                self.topic_params[topic]["Topic Sum"] -= self.word_vecs[word]
 
-                self.recalculate_topic_params(word, topic, "-")
-
+                self.recalculate_topic_params(word, topic, docID, "-")
                 posterior = []
                 for k in range(self.numtopics):  # Get PDF for each possible word-topic assignment
+
                     log_pdf = self.draw_new_wt_assgns(word, k)
                     Nkd = self.doc_topic_CT[docID, k]  # Count of topic in doc, Ndk
                     log_posterior = log(
                         Nkd + self.alpha) + log_pdf  # actual collapsed sampler from R. Das Paper, except in log form
                     posterior.append(log_posterior)
+                posterior -= np.mean(posterior)
                 posterior = np.exp(posterior)
                 normalized_post = posterior / np.sum(posterior)
                 new_word_topic = np.random.multinomial(1, pvals=normalized_post)
 
                 self.corpus[docID][topic] = np.argmax(new_word_topic)
                 self.update_document_topic_counts(word, self.corpus[docID][topic], docID, "+")
-                self.recalculate_topic_params(word, self.corpus[docID][topic], "+")
-            if docID % 20 == 0:
+                self.recalculate_topic_params(word, self.corpus[docID][topic], docID, "+")
+            if docID % 20 == 0 and docID != 0:
+                print normalized_post
+                print new_word_topic
                 print "{0} docs sampled".format(int(docID))
+
                 for k in range(self.numtopics):
                     print self.wvmodel.most_similar(positive=[self.topic_params[k]["Topic Mean"]])
 
 # ======================================================================================================================
 
-    def recalculate_topic_params(self, word, topic, operation, init=False):
+    def recalculate_topic_params(self, word, topic, docID, operation, init=False):
         """
         :param topic_id: index for topic
         :param topic_counts: a copy of the doc-topic count table
         :return: None - sets internal class variables
         """
+        # Update the topic-count table
+        self.update_document_topic_counts(word, topic, docID, operation)
 
-        L = self.topic_params[topic]["Lower Triangle"]
-
-        if operation == "-":  # Cholesky Rank One Downdate
-            centered = self.word_vecs[word] - self.topic_params[topic]["Topic Mean"]  # * np.sqrt((kappa_k+1)/kappa_k)
-            self.topic_params[topic]["Lower Triangle"] = self.solver.chol_downdate(L, centered)
-
+        # Update parameters related to the priors
         topic_count = np.sum(self.doc_topic_CT[:, topic], axis=0)  # N_k
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
-        scaled_topic_mean_K = self.get_scaled_topic_mean(topic, topic_count)  # V-Bar_k
-        # psi_k = self.priors.psi + scaled_topic_cov_K + ((self.priors.kappa * topic_count) / kappa_k) * (vk_mu.T.dot(vk_mu))  # Psi_k
-        topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * scaled_topic_mean_K)) / kappa_k  # Mu_k
+        scaleT = (kappa_k+1.) / (kappa_k * (nu_k - self.word_vec_size + 1.))
 
-        if operation == "+":  # Cholesky Rank One Update
-            centered = self.word_vecs[word] - topic_mean  # * np.sqrt((kappa_k+1)/kappa_k)
-            self.topic_params[topic]["Lower Triangle"] = self.solver.chol_update(L, centered)
+        if operation == "-":  # Remove data point contribution to the topic distribution
+            # Original equation is:
+            #    \Sigma \leftarrow \Sigma - (k_0 + N + 1)/(k_0 + N)(X_{n} - \mu_{n-1})(X_{n} - \mu_{n-1})^T
+            # We will scale the co-variance to remove the effect of kappa before performing the rank-1 update and
+            # then we will rescale
+            L = self.topic_params[topic]["Lower Triangle"]
+            L *= np.sqrt((kappa_k+1.) / (kappa_k+2.))  # Undo previous scaling (CUSTOM)
+            centered = (self.word_vecs[word] - self.topic_params[topic]["Topic Mean"])  # Get rank-1 matrix from point
+            L = self.solver.chol_downdate(L, centered)  # Choleksy downdate
+            L *= np.sqrt((kappa_k+1.) / (kappa_k))  # Apply new scaling (CUSTOM)
+            self.topic_params[topic]["Lower Triangle"] = L
+
+            # Correct the mean for the removed point
+            sample_mean_K = self.topic_sample_mean(topic, topic_count)  # V-Bar_k
+            topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * sample_mean_K)) / kappa_k  # Mu_k
+
+        else:  # operation == "+":  # Add data point contribution to the topic distribution
+            # Correct the mean for the added point
+            sample_mean_K = self.topic_sample_mean(topic, topic_count)  # V-Bar_k
+            topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * sample_mean_K)) / kappa_k  # Mu_k
+
+            # Original equation is:
+            #    \Sigma \leftarrow \Sigma + (k_0 + N + 1)/(k_0 + N)(X_{n} - \mu_{n-1})(X_{n} - \mu_{n-1})^T
+            # We will scale the co-variance to remove the effect of kappa before performing the rank-1 update and
+            # then we will rescale
+            L = self.topic_params[topic]["Lower Triangle"]
+            L *= np.sqrt((kappa_k-1) / kappa_k)  # Undo previous scaling (CUSTOM)
+            centered = (self.word_vecs[word] - topic_mean)  # Get rank-1 matrix from point
+            L = self.solver.chol_update(L, centered)  # Choleksy update
+            L *= np.sqrt((kappa_k+1) / kappa_k)  # Apply new scaling (CUSTOM)
+            self.topic_params[topic]["Lower Triangle"] = L
 
         L = self.topic_params[topic]["Lower Triangle"]
-        self.topic_params[topic]["Chol Det"] = np.sum(np.log(np.diag(L))) * 2  # 2 * sum_m_i(log(L_i,i))
+        self.topic_params[topic]["Chol Det"] = (np.sum(np.log(np.diag(L))) * 2) + np.log(scaleT) # 2 * sum_m_i(log(L_i,i))
         self.topic_params[topic]["Topic Count"] = topic_count
         self.topic_params[topic]["Topic Kappa"] = kappa_k
         self.topic_params[topic]["Topic Nu"] = nu_k
         self.topic_params[topic]["Topic Mean"] = topic_mean
+        if np.isnan(topic_mean).any() or np.isinf(topic_mean).any():
+            print topic_mean
 
 # ======================================================================================================================
 
-    def get_scaled_topic_mean(self, topic, topic_count):
+    def topic_sample_mean(self, topic, topic_count):
         """
         For a given topic, method calculates scaled topic Mean and Covariance (V-bar_k and C_k in R. Das Paper)
         \sum_d \sum_z=i (V_di) / N_k
@@ -247,7 +276,7 @@ class Gauss_LDA(object):
         :return: mean and covariance matrix.  Mean will be of shape (1 X word-vector dimension).
         Covariance will be matrix of size (word-vector dim X word-vector dim)
         """
-        scaled_topic_mean = self.topic_params[topic]["Topic Sum"] / topic_count
+        scaled_topic_mean = self.topic_params[topic]["Topic Sum"] / float(topic_count)
         return scaled_topic_mean
 
 # ======================================================================================================================
@@ -257,11 +286,11 @@ class Gauss_LDA(object):
 
         if operation == "-":
             self.topic_params[topic]["Topic Sum"] -= self.word_vecs[word]
-            self.doc_topic_CT[docID, topic] -= 1
+            self.doc_topic_CT[docID, topic] -= 1.
 
         if operation == "+":
             self.topic_params[topic]["Topic Sum"] += self.word_vecs[word]
-            self.doc_topic_CT[docID, topic] += 1
+            self.doc_topic_CT[docID, topic] += 1.
 
 # ======================================================================================================================
 
@@ -282,16 +311,20 @@ class Gauss_LDA(object):
         Nk = self.topic_params[topic]["Topic Count"]
         # (V_di - Mu)
         centered = self.word_vecs[word] - self.topic_params[topic]["Topic Mean"]
-        # (L^-1b)^T(L^-1b)
-        linalg.cho_solve((self.topic_params[topic]["Lower Triangle"], True), centered, overwrite_b=True,
-                         check_finite=True)
-        LLcomp = centered.T.dot(centered)  # TODO check math operations here
         d = self.word_vec_size  # dimensionality of word vector
+        kappa_k = self.topic_params[topic]["Topic Kappa"]
+
+        scaleT = np.sqrt((kappa_k + 1.) / kappa_k * (self.priors.nu - d + 1.))  # New
         nu = self.priors.nu + Nk - d + 1.
+
+        linalg.cho_solve((self.topic_params[topic]["Lower Triangle"] * scaleT, True), centered, overwrite_b=True,
+                 check_finite=True)
+        # (L^-1b)^T(L^-1b)
+        LLcomp = centered.T.dot(centered)
 
         # Log PDF of multivariate student-T distribution
         log_prob = gammaln(nu + d / 2.) - \
-                   (gammaln(nu / 2.) + (d / 2.) * (log(nu) + log(pi)) + 0.5 * cov_det + ((nu + d) / 2.) * log(
+                   (gammaln(nu / 2.) + (d / 2.) * (log(nu) + log(pi)) + (0.5 * cov_det) + ((nu + d) / 2.) * log(
                        (1. + LLcomp) / nu))
         return log_prob
 
