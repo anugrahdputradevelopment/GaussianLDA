@@ -76,6 +76,7 @@ class Gauss_LDA(object):
 
         print "Processing word-vectors, this takes a moment"
         vectors = Word2Vec.load_word2vec_format(fname=filepath, binary=False)
+        self.wvmodel = vectors
         useable_vocab = 0
         unusable_vocab = 0
         self.word_vec_size = vectors.vector_size
@@ -159,6 +160,9 @@ class Gauss_LDA(object):
                 self.word_topics[word] = np.argmax(new_word_topic)
                 self.doc_topic_CT = self.update_document_topic_counts(word, self.word_topics[word], "+")
                 self.recalculate_topic_params(self.word_topics[word], self.doc_topic_CT)
+            if docID % 1 == 0:
+                for k in range(self.numtopics):
+                    print self.wvmodel.most_similar(positive=[self.topic_params[k]["Topic Mean"]])
 
         return None
 
@@ -332,6 +336,11 @@ if __name__ == "__main__":
               "rabbit mouse horse goat", "coconut guava blueberry blackberry", "raptor hawk shark bear",
               "lemon lime fruit pear"]
 
+    f = '/Users/michael/Documents/GaussianLDA/clean20news.txt'
+    with open(f, 'r') as fi:
+        docs = fi.read().splitlines() #  These are all cleaned out
+        fi.close()
+
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
-    g = Gauss_LDA(2, corpus, wordvec_fileapth)
+    g = Gauss_LDA(2, docs, wordvec_fileapth)
     g.fit(100)
