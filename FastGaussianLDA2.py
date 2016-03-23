@@ -29,16 +29,16 @@ class Wishart(object):
     def set_params(self, word_vecs):
         word_vecs = np.vstack(word_vecs.values())  # turn dict of word vectors into a matrix
         self.nu = word_vecs.shape[1]  # dimensionality of word-vectors
-        self.kappa = 0.001
+        self.kappa = 0.1
         # self.psi = word_vecs.T.dot(word_vecs)#, axis=0)  # sum of squres -- from Murphy(2012)
         self.psi = np.identity(
-            word_vecs.shape[1]) * 10.  # changed this to identity matrix as in paper. No intuition here
+            word_vecs.shape[1]) * 3.  # changed this to identity matrix as in paper. No intuition here
         self.mu = np.mean(word_vecs, axis=0)
 
 # ======================================================================================================================
 
 class Gauss_LDA(object):
-    def __init__(self, num_topics, corpus, word_vector_filepath=None, word_vector_model=None):
+    def __init__(self, num_topics, corpus, word_vector_filepath=None, word_vector_model=None, alpha=1.):
         self.doc_topic_CT = None
         self.corpus = corpus
         self.priors = None
@@ -48,9 +48,12 @@ class Gauss_LDA(object):
         self.topic_params = defaultdict(dict)
         self.wordvecFP = word_vector_filepath
         self.word_vec_size = None
-        self.alpha = 50. / self.numtopics
+        self.alpha = alpha#3#1. / self.numtopics
         self.solver = cholesky.Helper()
         self.wvmodel = word_vector_model
+        self.test_word_topics = defaultdict(list)
+        self.test_word_topic_count = defaultdict(int)
+        self.word_topics = {}
 
 # ======================================================================================================================
 
@@ -66,7 +69,9 @@ class Gauss_LDA(object):
         for index, doc in enumerate(documents):
             words = doc.split()
             temp_corpus[index]['words'] = words
-            temp_corpus[index]['topics'] = np.random.randint(0, self.numtopics, size=len(words))  # Random topic assign
+            temp_corpus[index]['topics'] = np.empty(len(words))  # Random topic assign
+
+            # temp_corpus[index]['topics'] = np.random.randint(0, self.numtopics, size=len(words))  # Random topic assign
 
             for word in words:
                 self.vocab.add(word)
@@ -87,6 +92,21 @@ class Gauss_LDA(object):
         if filepath:
             print "Processing word-vectors, this takes a moment"
             self.wvmodel = gensim.models.Word2Vec.load_word2vec_format(fname=filepath, binary=False)
+            useable_vocab = 0
+            unusable_vocab = 0
+            self.word_vec_size = self.wvmodel.vector_size
+
+            for word in self.vocab:
+                try:
+                    self.word_vecs[word] = self.wvmodel[word]
+                    useable_vocab += 1
+                except KeyError:
+                    unusable_vocab += 1
+
+            print "There are {0} words that could be converted to word vectors in your corpus \n" \
+                  "There are {1} words that could NOT be converted to word vectors".format(useable_vocab,
+                                                                                           unusable_vocab)
+        else:
             useable_vocab = 0
             unusable_vocab = 0
             self.word_vec_size = self.wvmodel.vector_size
@@ -123,12 +143,12 @@ class Gauss_LDA(object):
         for i in range(iterations):
             self.sample()
             print "{0} iterations complete".format(i)
-            for k in xrange(self.numtopics):
-                for param in ("Topic Mean", "Lower Triangle"):
-                    results_file = "/Users/michael/Documents/GaussianLDA/output/iter{0}topic{1}{2}.txt".format(i,
-                                                                                                               k, param)
-                    open(results_file, 'w')
-                    np.savetxt(results_file, self.topic_params[k][param])
+            # for k in xrange(self.numtopics):
+            #     for param in ("Topic Mean", "Lower Triangle"):
+            #         results_file = "/Users/michael/Documents/GaussianLDA/output/iter{0}topic{1}{2}.txt".format(i,
+            #                                                                                                    k, param)
+            #         open(results_file, 'w')
+            #         np.savetxt(results_file, self.topic_params[k][param])
 
 # ======================================================================================================================
 
@@ -138,11 +158,15 @@ class Gauss_LDA(object):
 
         self.process_wordvectors(self.wordvecFP)
         self.priors = Wishart(self.word_vecs)  # set wishhart priors
-        self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))  # TODO: set dtype to np.float64
-        centroids = self.smart_centroids()  # Intializing topic means with KMeans cluster centroids>>>faster convergence
+        self.doc_topic_CT = np.zeros((len(self.corpus.keys()), self.numtopics))
+        # self.smart_centroids()
+        centroids, km = self.smart_centroids()  # Intializing topic means with KMeans cluster centroids>>>faster convergence
         for k in range(self.numtopics):
             self.topic_params[k]["Topic Sum"] = centroids[k]
             self.topic_params[k]["Topic Mean"] = centroids[k]
+        for docID in self.corpus.keys():  # hard setting word-topic assignments as per cluster membership to help model along
+            for i, word in enumerate(self.corpus[docID]['words']):
+                self.corpus[docID]['topics'][i] = self.word_topics[word]
 
         # get Doc-Topic Counts
         for docID in self.corpus.keys():
@@ -151,31 +175,90 @@ class Gauss_LDA(object):
                 # self.topic_params[topic]['Topic Sum'] += self.word_vecs[word]  # sum of topic vectors
 
 
+        k = self.priors.kappa
+        nu = self.priors.nu
+        d = self.word_vec_size
+        scaleT = (k + 1.) / (k * (nu - d + 1.))  # Needed to convert L => covariance
+
+        # print self.doc_topic_CT
         for k in range(self.numtopics):  # Init parameters for topic distributions
             # TODO: calculate also covar matrices
             Nk = np.sum(self.doc_topic_CT[:, k], axis=0)
             self.topic_params[k]["Lower Triangle"] = linalg.cholesky(self.priors.psi, lower=True,
                                                                      check_finite=True)
-            self.topic_params[k]["Topic Mean"] = self.topic_params[k]["Topic Sum"] / Nk
-
-            # 2 * sum_m_i(log(L_i,i))
-            self.topic_params[k]["Chol Det"] = np.sum(np.log(np.diag(self.topic_params[k]["Lower Triangle"]))) * 2
+            # self.topic_params[k]["Topic Mean"] = self.topic_params[k]["Topic Sum"] / Nk
+            # self.topic_params[k]["Topic Sum"] *= Nk  # Unravling it so it is actually a sum here
             self.topic_params[k]["Topic Count"] = Nk
             self.topic_params[k]["Topic Kappa"] = self.priors.kappa + Nk
+
+            # 2 * sum_m_i(log(L_i,i)) + log(scaleT)
+            self.topic_params[k]["Chol Det"] = np.sum(np.log(np.diag(self.topic_params[k]["Lower Triangle"]))) * 2 \
+            + np.log(scaleT)
+
+        print np.sum(self.doc_topic_CT, axis=0)
 
         print "Initialization complete"
 
 # ======================================================================================================================
 
     def smart_centroids(self):
-
+        print "getting cluster centroids"
         from sklearn.cluster import KMeans
         vecs = []
         for word in self.vocab:
             vecs.append(self.word_vecs[word])
-        km = KMeans(n_clusters=self.numtopics, n_jobs=1, tol=1e-6, init='random')
+        km = KMeans(n_clusters=self.numtopics, n_jobs=1, tol=1e-6, init='k-means++')
         km.fit(np.array(vecs))
-        return km.cluster_centers_
+        for idx, word in enumerate(self.vocab):
+            self.word_topics[word] = km.labels_[idx]
+        vec_matrix = np.array(vecs)
+        for k in range(self.numtopics):
+            idx = np.where(km.labels_ == k)
+            covar = np.cov(vec_matrix[idx] - km.cluster_centers_[k], rowvar=0)  # Mean centered covariance matrix
+            self.topic_params[k]['Topic Covar'] = covar
+            self.topic_params[k]["Topic Mean"] = km.cluster_centers_[k]
+            self.topic_params[k]["Topic Sum"] = km.cluster_centers_[k]
+
+
+
+        # for docID, doc in self.corpus.iteritems():
+        #     for idx, word in enumerate(doc['words']):
+        #
+        #         log_posterior = np.zeros(self.numtopics)
+        #         for k in range(self.numtopics):
+        #             cov = self.topic_params[k]["Topic Covar"]
+        #             cov_det = np.linalg.det(cov)
+        #             cov_inv = np.linalg.inv(cov)
+        #             Nk = self.alpha
+        #             # (V_di - Mu)
+        #             centered = self.word_vecs[word] - self.topic_params[k]["Topic Mean"]
+        #             d = self.word_vec_size  # dimensionality of word vector
+        #             kappa_k = self.priors.kappa
+        #
+        #             scaleT = np.sqrt((kappa_k + 1.) / kappa_k * (self.priors.nu - d + 1.))  # Covariance = chol / sqrt(scaleT)
+        #             nu = self.priors.nu + Nk - d + 1.
+        #
+        #
+        #         # (L^-1b)^T(L^-1b)
+        #             LLcomp = centered.T.dot(cov_inv).dot(centered)
+        #
+        #         # Log PDF of multivariate student-T distribution
+        #             log_prob = \
+        #                 gammaln((nu + d) / 2.) - \
+        #                 (gammaln(nu / 2.) + (d / 2.) * (log(nu) + log(pi))
+        #                 + (0.5 * cov_det) + ((nu + d) / 2.) * log(1. + LLcomp/nu))
+        #
+        #             log_prob += np.log(self.alpha)
+        #             log_posterior[k] = log_prob
+        #
+        #         max_log_posterior = np.max(log_posterior)
+        #         log_posterior -= max_log_posterior
+        #         normalized_posterior = np.exp(log_posterior - np.log(np.sum(np.exp(log_posterior))))
+        #         topic = np.argmax(np.random.multinomial(1, pvals=normalized_posterior))
+        #         self.corpus[docID]['topics'][idx] = topic
+
+
+        return km.cluster_centers_, km
 
 # ======================================================================================================================
 
@@ -185,7 +268,7 @@ class Gauss_LDA(object):
         :return: None.  Readjusts topic distribution parameters and topic-counts
         """
 
-        for docID in self.corpus.keys():
+        for docID in self.corpus.iterkeys():
             for idx in range(len(self.corpus[docID]['words'])):
                 word = self.corpus[docID]['words'][idx]
                 current_topic = self.corpus[docID]['topics'][idx]
@@ -203,18 +286,19 @@ class Gauss_LDA(object):
                 log_posterior -= max_log_posterior
                 normalized_post = np.exp(log_posterior - np.log(np.sum(np.exp(log_posterior))))
                 new_topic = np.argmax(np.random.multinomial(1, pvals=normalized_post))
-
+                self.bin_search(np.cumsum(normalized_post), np.random.uniform(0.0, 1.0), 0, self.numtopics-1)
+                # print new_topic
+                self.test_word_topics[word].append(new_topic)  # testing
+                self.test_word_topic_count[word] += 1.  # testing
                 self.corpus[docID]['topics'][idx] = new_topic
-                self.update_document_topic_counts(word, new_topic, docID, "+")
+                # self.update_document_topic_counts(word, new_topic, docID, "+")
                 self.recalculate_topic_params(word, new_topic, docID, "+")
 
             if docID % 20 == 0:
                 print "{0} docs sampled".format(int(docID))
 
 
-
-                for k in range(self.numtopics):
-                    print self.wvmodel.most_similar(positive=[self.topic_params[k]["Topic Mean"]])
+        self.display_results()
 
 # ======================================================================================================================
 
@@ -231,31 +315,32 @@ class Gauss_LDA(object):
         topic_count = np.sum(self.doc_topic_CT[:, topic], axis=0)  # N_k
         kappa_k = self.priors.kappa + topic_count  # K_k
         nu_k = self.priors.nu + topic_count  # V_k
-        scaleT = (kappa_k+1.) / (kappa_k * (nu_k - self.word_vec_size + 1.))  # Needed to convert L => covariance
+        scaleT = (kappa_k + 1.) / (kappa_k * (nu_k - self.word_vec_size + 1.))  # Needed to convert L => covariance
 
         if operation == "-":  # Remove data point contribution to the topic distribution
             # Original equation is:
             #    \Sigma \leftarrow \Sigma - (k_0 + N + 1)/(k_0 + N)(X_{n} - \mu_{n-1})(X_{n} - \mu_{n-1})^T
             L = self.topic_params[topic]["Lower Triangle"]
             centered = (self.word_vecs[word] - self.topic_params[topic]["Topic Mean"])  # Get rank-1 matrix from point
-            centered *= np.sqrt( (kappa_k+1.) / kappa_k)  # Scale for recursive downdate
+            centered *= np.sqrt((kappa_k+1.) / kappa_k)  # Scale for recursive downdate
             L = self.solver.chol_downdate(L, centered)  # Choleksy downdate
             self.topic_params[topic]["Lower Triangle"] = L
 
             # Correct the mean for the removed point
             sample_mean_K = self.topic_sample_mean(topic, topic_count)  # V-Bar_k
             topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * sample_mean_K)) / kappa_k  # Mu_k
-
+            topic_mean = ((self.priors.kappa * self.priors.mu) + (sample_mean_K)) / kappa_k  # Mu_k
         else:  # operation == "+":  # Add data point contribution to the topic distribution
             # Correct the mean for the added point
             sample_mean_K = self.topic_sample_mean(topic, topic_count)  # V-Bar_k
             topic_mean = ((self.priors.kappa * self.priors.mu) + (topic_count * sample_mean_K)) / kappa_k  # Mu_k
+            # topic_mean = ((self.priors.kappa * self.priors.mu) + (sample_mean_K)) / kappa_k  # Mu_k
 
             # Original equation is:
             #    \Sigma \leftarrow \Sigma + (k_0 + N + 1)/(k_0 + N)(X_{n} - \mu_{n-1})(X_{n} - \mu_{n-1})^T
             L = self.topic_params[topic]["Lower Triangle"]
             centered = (self.word_vecs[word] - topic_mean)  # Get rank-1 matrix from point
-            centered *= np.sqrt(kappa_k / (kappa_k-1.))  # Scale for recursive update
+            centered *= np.sqrt(kappa_k / (kappa_k - 1.))  # Scale for recursive update
             L = self.solver.chol_update(L, centered)  # Choleksy update
             self.topic_params[topic]["Lower Triangle"] = L
 
@@ -348,7 +433,7 @@ class Gauss_LDA(object):
     def bin_search(self, pdf, key, start, end):  # Not using
         if start > end:
             return start
-        mid = (start+end) / 2.0
+        mid = int((start+end) / 2)
         if key == pdf[mid]:
             return mid + 1
         if key < pdf[mid]:
@@ -400,8 +485,13 @@ class Gauss_LDA(object):
         return word_topics
 
     def display_results(self):
+        print 'print topic means'
         for k in range(self.numtopics):
-            print self.wvmodel.most_similar(positive=[self.topic_params[k]["Topic Mean"]])
+            print "TOPIC {0}:".format(k), \
+                zip(*self.wvmodel.most_similar(positive=[self.topic_params[k]["Topic Mean"]], topn=9))[0]
+            if k == max(range(self.numtopics)):
+                print "\n"
+        print "Document-Topic Counts:,", np.sum(self.doc_topic_CT, axis=0)
 
 
 
@@ -418,6 +508,7 @@ if __name__ == "__main__":
         fi.close()
     wordvec_fileapth = "/Users/michael/Documents/Gaussian_LDA-master/data/glove.wiki/glove.6B.50d.txt"
     start = time.time()
-    g = Gauss_LDA(3, docs, word_vector_filepath=wordvec_fileapth)
-    g.fit(500)
+    g = Gauss_LDA(2, docs, word_vector_filepath=wordvec_fileapth)
+
+    g.fit(50)
     print time.time() - start
